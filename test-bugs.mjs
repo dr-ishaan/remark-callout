@@ -31,43 +31,57 @@ async function processMarkdown(md) {
   return String(result);
 }
 
+/** Extract the callout title text from rendered HTML */
+function extractTitle(html) {
+  return html.match(/callout-title[^>]*>([^<]+)/)?.[1] ?? null;
+}
+
+/** Check if text appears inside the callout-body div */
+function bodyContains(html, text) {
+  const bodyMatch = html.match(/callout-body[^>]*>([\s\S]*?)<\/div>\s*<\/(?:div|details)>/);
+  return bodyMatch ? bodyMatch[1].includes(text) : false;
+}
+
 // ─── Test Bug 1 Fix: Body content NOT silently dropped ─────────────────
 
 console.log('\n=== Bug 1: Body content silently dropped ===');
 
 {
-  const html = await processMarkdown('> [!NOTE] This is inline body text');
-  assert(
-    html.includes('This is inline body text'),
-    'Inline body text on marker line is preserved'
-  );
-  assert(
-    html.includes('callout-body'),
-    'Callout body container exists'
-  );
-}
-
-{
+  // Multi-line: body on subsequent lines
   const html = await processMarkdown('> [!WARNING]\n> First paragraph\n> Second paragraph');
   assert(
     html.includes('First paragraph') && html.includes('Second paragraph'),
     'Multi-line body content is preserved'
   );
+  assert(
+    extractTitle(html) === 'Warning',
+    'Multi-line: title is "Warning" (not body text)'
+  );
 }
 
 {
+  // No body at all
   const html = await processMarkdown('> [!TIP]');
   assert(
     html.includes('callout'),
     'Callout without body still renders'
   );
+  assert(
+    extractTitle(html) === 'Tip',
+    'No-body: title is "Tip"'
+  );
 }
 
 {
+  // Custom title + body on next line
   const html = await processMarkdown('> [!NOTE] Custom Title\n> Body content here');
   assert(
-    html.includes('Custom Title') && html.includes('Body content here'),
-    'Custom title + body both preserved'
+    extractTitle(html) === 'Custom Title',
+    'Custom title + body: title is "Custom Title"'
+  );
+  assert(
+    bodyContains(html, 'Body content here'),
+    'Custom title + body: body contains "Body content here"'
   );
 }
 
@@ -166,52 +180,108 @@ assert(
   'rate-limit is in BUILT_IN_KEYS'
 );
 
-// ─── Additional edge case tests ────────────────────────────────────────
+// ─── Test: \s* newline regression (Bug 3 from verification) ────────────
 
-console.log('\n=== Additional edge cases ===');
+console.log('\n=== Bug 3 regression: \\s* eats newlines ===');
+
+{
+  // When remark-parse merges lines into one text node with \n,
+  // the body text must NOT leak into the title.
+  const html = await processMarkdown('> [!NOTE]\n> Body after newline');
+  assert(
+    extractTitle(html) === 'Note',
+    'Newline-separated: title is "Note" (body text did NOT leak into title)'
+  );
+  assert(
+    bodyContains(html, 'Body after newline'),
+    'Newline-separated: body contains "Body after newline"'
+  );
+}
+
+{
+  // Foldable with newline body
+  const html = await processMarkdown('> [!NOTE]+\n> Foldable body');
+  assert(
+    extractTitle(html) === 'Note',
+    'Foldable newline: title is "Note" (no leak)'
+  );
+  assert(
+    bodyContains(html, 'Foldable body'),
+    'Foldable newline: body contains "Foldable body"'
+  );
+}
+
+// ─── Test: Foldable renders as <details> (Bug 4 from verification) ────
+
+console.log('\n=== Bug 4: Foldable renders as <details> ===');
 
 {
   const html = await processMarkdown('> [!BEST-PRACTICE]+ Expandable tip');
+  const rootTag = html.match(/^<(\w+)/)?.[1];
   assert(
-    html.includes('callout-foldable'),
-    'Foldable hyphenated callout works with +'
+    rootTag === 'details',
+    'Foldable [!BEST-PRACTICE]+ renders as <details>'
   );
   assert(
-    html.includes('open'),
-    'Foldable open state is set'
+    html.includes('callout-foldable'),
+    'Foldable has callout-foldable class'
+  );
+  assert(
+    html.includes('<summary'),
+    'Foldable has <summary> element'
+  );
+  assert(
+    html.includes('data-callout-fold="open"'),
+    'Foldable + has data-callout-fold="open"'
   );
 }
 
 {
   const html = await processMarkdown('> [!CI-CD]- Collapsed by default');
+  const rootTag = html.match(/^<(\w+)/)?.[1];
   assert(
-    html.includes('callout-foldable'),
-    'Foldable hyphenated callout works with -'
+    rootTag === 'details',
+    'Foldable [!CI-CD]- renders as <details>'
   );
   assert(
-    html.includes('closed'),
-    'Foldable closed state is set'
-  );
-}
-
-{
-  const html = await processMarkdown('> [!NOTE] Still works');
-  assert(
-    html.includes('callout-note'),
-    'Non-hyphenated [!NOTE] still works'
+    html.includes('data-callout-fold="closed"'),
+    'Foldable - has data-callout-fold="closed"'
   );
 }
 
 {
+  const html = await processMarkdown('> [!NOTE] Not foldable');
+  const rootTag = html.match(/^<(\w+)/)?.[1];
   assert(
-    BUILT_IN_CALLOUTS['terms'].icon.includes('svg'),
-    '"terms" key exists (purple glossary cluster, not overwritten by amber)'
+    rootTag === 'div',
+    'Non-foldable [!NOTE] renders as <div>'
   );
   assert(
-    BUILT_IN_CALLOUTS['legal-terms'] !== undefined,
-    '"legal-terms" key exists as renamed amber duplicate'
+    !html.includes('callout-foldable'),
+    'Non-foldable has no callout-foldable class'
   );
 }
+
+// ─── Test: Duplicate terms key (Bug 5 from verification) ──────────────
+
+console.log('\n=== Bug 5: Duplicate terms key ===');
+
+assert(
+  BUILT_IN_CALLOUTS['terms'].icon.includes('svg'),
+  '"terms" key exists (purple glossary cluster, not overwritten by amber)'
+);
+assert(
+  BUILT_IN_CALLOUTS['terms'].icon.includes('M12.586'),
+  '"terms" uses ICONS.tags (purple glossary icon)'
+);
+assert(
+  BUILT_IN_CALLOUTS['legal-terms'] !== undefined,
+  '"legal-terms" key exists as renamed amber duplicate'
+);
+assert(
+  BUILT_IN_CALLOUTS['legal-terms'].icon.includes('m16 16'),
+  '"legal-terms" uses ICONS.scale (amber legal icon)'
+);
 
 // ─── Summary ───────────────────────────────────────────────────────────
 

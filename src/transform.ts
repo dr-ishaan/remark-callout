@@ -27,8 +27,14 @@ import { BUILT_IN_CALLOUTS } from './defaults.js';
  *   1 → type key  (e.g., "NOTE", "WARNING", "BEST-PRACTICE")
  *   2 → foldable  ("+" or "-" or undefined) — comes AFTER the closing bracket
  *   3 → title     (everything after optional foldable char, trimmed)
+ *
+ * Note: `[^\S\n]*` is used instead of `\s*` so that newlines are NOT
+ * consumed. If remark-parse merges blockquote lines into a single text
+ * node like `[!NOTE]\nBody here`, the `\n` must remain so the body
+ * text after it can be extracted by `transformBlockquote` rather than
+ * being captured as the title.
  */
-const CALLOUT_RE = /^\[!([\w-]+)\]([\+\-])?\s*(.*)/;
+const CALLOUT_RE = /^\[!([\w-]+)\]([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Parse a text value for a callout marker.
