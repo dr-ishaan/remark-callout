@@ -1,0 +1,229 @@
+/**
+ * remark-callout — Default Stylesheet
+ *
+ * Uses oklch color components set via inline style on each callout:
+ *   --callout-l: lightness
+ *   --callout-c: chroma
+ *   --callout-h: hue
+ *
+ * Dark mode is automatic via `prefers-color-scheme: dark`.
+ *
+ * Import in your Astro layout / global CSS:
+ *   @import 'remark-callout/styles/callout.css';
+ *
+ * Or copy and customize — every value is a CSS variable you can override.
+ */
+
+/* ─── CSS Custom Properties (User Overridable) ─────────────────────────── */
+
+:root {
+  --callout-radius: 0.5rem;
+  --callout-padding: 1rem 1.25rem;
+  --callout-margin: 1.5em 0;
+  --callout-border-width: 4px;
+  --callout-header-gap: 0.5rem;
+  --callout-header-margin-bottom: 0.5rem;
+  --callout-body-font-size: 0.95rem;
+  --callout-title-font-size: 0.875rem;
+  --callout-title-font-weight: 600;
+  --callout-icon-size: 1.15rem;
+
+  /* Alpha values — adjust to taste */
+  --callout-bg-alpha: 0.06;
+  --callout-border-alpha: 1;
+  --callout-icon-alpha: 1;
+
+  /* Fallback color if --callout-l/c/h are not set (blue) */
+  --callout-l: 0.55;
+  --callout-c: 0.18;
+  --callout-h: 250;
+}
+
+/* ─── Base Callout ─────────────────────────────────────────────────────── */
+
+.callout {
+  --callout-color: oklch(var(--callout-l) var(--callout-c) var(--callout-h));
+  --callout-bg: oklch(var(--callout-l) var(--callout-c) var(--callout-h) / var(--callout-bg-alpha));
+  --callout-border: oklch(var(--callout-l) var(--callout-c) var(--callout-h) / var(--callout-border-alpha));
+  --callout-icon-color: oklch(var(--callout-l) var(--callout-c) var(--callout-h) / var(--callout-icon-alpha));
+
+  border-left: var(--callout-border-width) solid var(--callout-border);
+  background: var(--callout-bg);
+  border-radius: var(--callout-radius);
+  padding: var(--callout-padding);
+  margin: var(--callout-margin);
+  overflow: hidden;
+}
+
+/* ─── Header ───────────────────────────────────────────────────────────── */
+
+.callout-header {
+  display: flex;
+  align-items: center;
+  gap: var(--callout-header-gap);
+  margin-bottom: var(--callout-header-margin-bottom);
+  user-select: none;
+}
+
+/* ─── Icon ─────────────────────────────────────────────────────────────── */
+
+.callout-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--callout-icon-size);
+  height: var(--callout-icon-size);
+  flex-shrink: 0;
+  color: var(--callout-icon-color);
+}
+
+.callout-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── Title ────────────────────────────────────────────────────────────── */
+
+.callout-title {
+  font-weight: var(--callout-title-font-weight);
+  font-size: var(--callout-title-font-size);
+  color: var(--callout-icon-color);
+  line-height: 1.4;
+}
+
+/* ─── Body ─────────────────────────────────────────────────────────────── */
+
+.callout-body {
+  font-size: var(--callout-body-font-size);
+  line-height: 1.7;
+  color: inherit;
+}
+
+/* Reset last paragraph margin in body */
+.callout-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* Nested blockquotes inside callouts */
+.callout-body blockquote {
+  margin: 0.75em 0;
+  padding: 0.25em 0.75em;
+  border-left: 3px solid oklch(0.7 0 0 / 0.2);
+  color: oklch(0.5 0 0 / 0.8);
+}
+
+.callout-body blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* Code blocks inside callouts */
+.callout-body pre {
+  margin: 0.75em 0;
+  border-radius: calc(var(--callout-radius) - 2px);
+}
+
+/* Lists inside callouts */
+.callout-body ul,
+.callout-body ol {
+  padding-left: 1.25em;
+  margin: 0.5em 0;
+}
+
+.callout-body li > :last-child {
+  margin-bottom: 0;
+}
+
+/* ─── Nested Callouts ──────────────────────────────────────────────────── */
+
+.callout .callout {
+  margin: 0.75em 0;
+  border-left-width: 3px;
+}
+
+.callout .callout .callout {
+  margin: 0.5em 0;
+  border-left-width: 2px;
+}
+
+/* ─── Empty Callout (no body) ──────────────────────────────────────────── */
+
+.callout:has(> .callout-body:empty) {
+  --callout-header-margin-bottom: 0;
+}
+
+/* ─── Foldable Callouts ────────────────────────────────────────────────── */
+
+/* Hide the native <details> triangle marker */
+.callout-foldable > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.callout-foldable > summary::-webkit-details-marker {
+  display: none;
+}
+
+.callout-foldable > summary::marker {
+  display: none;
+  content: '';
+}
+
+/* Collapsed body */
+.callout-foldable:not([open]) > .callout-body {
+  display: none;
+}
+
+/* Fold toggle chevron */
+.callout-foldable > .callout-header::after {
+  content: '';
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-left: auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  opacity: 0.5;
+  flex-shrink: 0;
+  color: var(--callout-icon-color);
+}
+
+.callout-foldable[open] > .callout-header::after {
+  transform: rotate(-135deg);
+}
+
+/* ─── Dark Mode ────────────────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --callout-bg-alpha: 0.1;
+    --callout-icon-alpha: 0.9;
+  }
+
+  .callout-body blockquote {
+    color: oklch(0.7 0 0 / 0.8);
+    border-left-color: oklch(0.6 0 0 / 0.3);
+  }
+
+  .callout-foldable > .callout-header::after {
+    opacity: 0.4;
+  }
+}
+
+/* ─── Print ────────────────────────────────────────────────────────────── */
+
+@media print {
+  .callout {
+    border-left-width: 3px;
+    break-inside: avoid;
+  }
+
+  .callout-foldable > .callout-body {
+    display: block !important;
+  }
+
+  .callout-foldable > .callout-header::after {
+    display: none;
+  }
+}

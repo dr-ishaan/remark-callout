@@ -1,0 +1,64 @@
+{
+  "name": "remark-callout",
+  "version": "1.0.0",
+  "description": "Remark plugin for GitHub/Obsidian-style callouts in the unified pipeline. Transforms [!TYPE] blockquotes into styled HTML containers with SVG icons, oklch colors, and optional collapsible support.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles/callout.css": "./styles/callout.css"
+  },
+  "files": [
+    "dist",
+    "styles"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "remark",
+    "remark-plugin",
+    "unified",
+    "callout",
+    "admonition",
+    "blockquote",
+    "obsidian",
+    "github",
+    "mdx",
+    "markdown",
+    "ast"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "mdast-util-to-hast": "^13.0.0",
+    "unified": "^11.0.0"
+  },
+  "dependencies": {
+    "hast-util-from-html": "^2.0.3",
+    "unist-util-visit": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/hast": "^3.0.0",
+    "@types/mdast": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/unist": "^3.0.0",
+    "mdast-util-to-hast": "^13.0.0",
+    "rehype-stringify": "^10.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.0.0",
+    "typescript": "^5.7.0",
+    "unified": "^11.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  }
+}
