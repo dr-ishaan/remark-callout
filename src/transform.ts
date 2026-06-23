@@ -267,17 +267,16 @@ export function transformBlockquote(
       showTitle: config.showTitle,
       showIcon: config.showIcon,
       hName: parsed.foldable !== false ? 'details' : config.tag,
+      // Only `style` is read from hProperties by calloutToHast — the
+      // className / data-callout / data-callout-fold attributes are built
+      // directly in the handler (single source of truth, avoids the
+      // "properties set twice" anti-pattern that previously existed when
+      // state.applyData was called).
+      //
+      // hName IS still read by the handler (it computes tagName from it
+      // for non-foldable callouts), so we keep it above.
       hProperties: {
-        className: [
-          'callout',
-          `callout-${parsed.type}`,
-          ...(parsed.foldable !== false ? ['callout-foldable'] : []),
-        ],
-        'data-callout': parsed.type,
         style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
-        ...(parsed.foldable !== false
-          ? { 'data-callout-fold': parsed.foldable }
-          : {}),
       },
     },
     children: bodyChildren,

@@ -26,25 +26,14 @@
 import type { CalloutNode } from './types.js';
 import type { Element, ElementContent, Properties, Text as HastText } from 'hast';
 import type { State } from 'mdast-util-to-hast';
-
-/**
- * Lazily-loaded `hast-util-from-html`. We use dynamic `import()` so that
- * the module works in ESM contexts where `require` is unavailable (the
- * previous `require()` call always threw in ESM and silently fell back
- * to the manual parser, making the declared dependency dead code).
- *
- * The promise is cached so subsequent calls do not re-import.
- */
-let fromHtmlPromise: Promise<typeof import('hast-util-from-html') | null> | null = null;
-
-async function getFromHtml(): Promise<typeof import('hast-util-from-html') | null> {
-  if (fromHtmlPromise === null) {
-    fromHtmlPromise = import('hast-util-from-html')
-      .then((mod) => mod)
-      .catch(() => null);
-  }
-  return fromHtmlPromise;
-}
+// `hast-util-from-html` is a declared runtime dependency (see package.json).
+// We import it statically (top-level) so it is always available on the first
+// call. The previous dynamic `import()` dance meant the library hadn't
+// resolved yet on the first callout icon, silently falling back to the
+// manual parser — which mishandled HTML comments, CDATA, and certain
+// attribute forms. With a static import, the manual parser only runs as a
+// true fallback if `fromHtml` itself throws on malformed input.
+import { fromHtml } from 'hast-util-from-html';
 
 /**
  * Parse an inline SVG string into a HAST ElementContent array.
@@ -53,35 +42,19 @@ async function getFromHtml(): Promise<typeof import('hast-util-from-html') | nul
  * well-formed HTML/SVG including comments, CDATA, single-quoted attrs.
  *
  * Strategy 2 (fallback): a manual parser for the specific SVG format
- * produced by the `svg()` template in defaults.ts. Used if the dynamic
- * import fails (e.g., the dependency was tree-shaken away).
- *
- * Because `calloutToHast` is called synchronously by `mdast-util-to-hast`,
- * we eagerly kick off the dynamic import at module load and check its
- * resolved value here. If the import hasn't resolved yet on the first
- * call, we fall back to the manual parser — once the import resolves,
- * subsequent calls use the library.
+ * produced by the `svg()` template in defaults.ts. Used only if
+ * `fromHtml` throws (e.g., on severely malformed input).
  */
-let fromHtmlResolved: typeof import('hast-util-from-html') | null = null;
-let fromHtmlAttempted = false;
-
 function svgToHast(svgString: string): ElementContent[] {
-  // Strategy 1: Use hast-util-from-html if already imported.
-  if (!fromHtmlAttempted) {
-    fromHtmlAttempted = true;
-    // Kick off the import; result will be available on subsequent calls.
-    getFromHtml().then((mod) => { fromHtmlResolved = mod; });
-  }
-  if (fromHtmlResolved) {
-    try {
-      const hastRoot = fromHtmlResolved.fromHtml(svgString, { fragment: true });
-      return hastRoot.children.filter(
-        (child: { type: string }): child is ElementContent =>
-          child.type === 'element' || child.type === 'text'
-      );
-    } catch {
-      // Fall through to manual parser
-    }
+  // Strategy 1: hast-util-from-html (always available via static import).
+  try {
+    const hastRoot = fromHtml(svgString, { fragment: true });
+    return hastRoot.children.filter(
+      (child: { type: string }): child is ElementContent =>
+        child.type === 'element' || child.type === 'text'
+    );
+  } catch {
+    // Fall through to manual parser
   }
 
   // Strategy 2: Manual SVG parsing fallback
