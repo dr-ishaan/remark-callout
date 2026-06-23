@@ -58,6 +58,10 @@ export { BUILT_IN_CALLOUTS, BUILT_IN_KEYS } from './defaults.js';
  *   .use(rehypeStringify)
  *   .processSync('> [!ML] This is a custom callout')
  * ```
+ *
+ * **Important:** You MUST pass `{ handlers: { callout: calloutToHast } }` to
+ * `remark-rehype`. Without it, callouts render as empty `<div>`s with no
+ * header, body, or icon.
  */
 const remarkCallout: Plugin<[CalloutOptions?], Root> = function (options) {
   const config = resolveConfig(options);

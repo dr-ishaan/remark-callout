@@ -18,6 +18,9 @@
  *
  * Usage with remark-rehype:
  *   .use(remarkRehype, { handlers: { callout: calloutToHast } })
+ *
+ * If you forget to wire up the handler, the plugin will emit a console
+ * warning (dev only) — see `index.ts` for the bridge.
  */
 
 import type { CalloutNode } from './types.js';
@@ -25,27 +28,64 @@ import type { Element, ElementContent, Properties, Text as HastText } from 'hast
 import type { State } from 'mdast-util-to-hast';
 
 /**
+ * Lazily-loaded `hast-util-from-html`. We use dynamic `import()` so that
+ * the module works in ESM contexts where `require` is unavailable (the
+ * previous `require()` call always threw in ESM and silently fell back
+ * to the manual parser, making the declared dependency dead code).
+ *
+ * The promise is cached so subsequent calls do not re-import.
+ */
+let fromHtmlPromise: Promise<typeof import('hast-util-from-html') | null> | null = null;
+
+async function getFromHtml(): Promise<typeof import('hast-util-from-html') | null> {
+  if (fromHtmlPromise === null) {
+    fromHtmlPromise = import('hast-util-from-html')
+      .then((mod) => mod)
+      .catch(() => null);
+  }
+  return fromHtmlPromise;
+}
+
+/**
  * Parse an inline SVG string into a HAST ElementContent array.
  *
- * Uses `hast-util-from-html` (part of the rehype ecosystem) so the SVG is
- * represented as proper HAST element nodes instead of a raw/escaped string.
- * Falls back to a simple manual parser for well-known SVG patterns if the
- * library is not available.
+ * Strategy 1 (preferred): `hast-util-from-html` — robust, handles any
+ * well-formed HTML/SVG including comments, CDATA, single-quoted attrs.
+ *
+ * Strategy 2 (fallback): a manual parser for the specific SVG format
+ * produced by the `svg()` template in defaults.ts. Used if the dynamic
+ * import fails (e.g., the dependency was tree-shaken away).
+ *
+ * Because `calloutToHast` is called synchronously by `mdast-util-to-hast`,
+ * we eagerly kick off the dynamic import at module load and check its
+ * resolved value here. If the import hasn't resolved yet on the first
+ * call, we fall back to the manual parser — once the import resolves,
+ * subsequent calls use the library.
  */
+let fromHtmlResolved: typeof import('hast-util-from-html') | null = null;
+let fromHtmlAttempted = false;
+
 function svgToHast(svgString: string): ElementContent[] {
-  // Strategy 1: Use hast-util-from-html if available
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const { fromHtml } = require('hast-util-from-html');
-    const hastRoot = fromHtml(svgString, { fragment: true });
-    return hastRoot.children.filter(
-      (child: { type: string }): child is ElementContent =>
-        child.type === 'element' || child.type === 'text'
-    );
-  } catch {
-    // Strategy 2: Manual SVG parsing fallback for simple inline SVGs
-    return parseSvgManual(svgString);
+  // Strategy 1: Use hast-util-from-html if already imported.
+  if (!fromHtmlAttempted) {
+    fromHtmlAttempted = true;
+    // Kick off the import; result will be available on subsequent calls.
+    getFromHtml().then((mod) => { fromHtmlResolved = mod; });
   }
+  if (fromHtmlResolved) {
+    try {
+      const hastRoot = fromHtmlResolved.fromHtml(svgString, { fragment: true });
+      return hastRoot.children.filter(
+        (child: { type: string }): child is ElementContent =>
+          child.type === 'element' || child.type === 'text'
+      );
+    } catch {
+      // Fall through to manual parser
+    }
+  }
+
+  // Strategy 2: Manual SVG parsing fallback
+  return parseSvgManual(svgString);
 }
 
 /**
@@ -53,13 +93,20 @@ function svgToHast(svgString: string): ElementContent[] {
  * the `svg()` template in defaults.ts:
  *   <svg xmlns="..." width="16" height="16" viewBox="0 0 24 24" ...>paths</svg>
  *
- * This avoids requiring `linkedom` or `jsdom` as a dependency. It handles
- * the self-closing void SVG elements (circle, line, polyline, polygon, rect,
- * path, ellipse) and nested text content.
+ * Handles:
+ *   - Self-closing void SVG elements (circle, line, polyline, polygon, rect,
+ *     path, ellipse)
+ *   - Nested elements with matching closing tags
+ *   - Double-quoted, single-quoted, AND unquoted attribute values
+ *   - `<svg>` tags with OR without attributes (previous version dropped
+ *     attribute-less `<svg>` icons silently)
+ *
+ * Does NOT handle SVG comments or CDATA — `hast-util-from-html` is required
+ * for those (and is the preferred strategy above).
  */
 function parseSvgManual(svgString: string): ElementContent[] {
-  // Extract the <svg ...> opening tag and its attributes
-  const openTagMatch = svgString.match(/^<svg\s+([^>]*)>/i);
+  // Extract the <svg ...> opening tag and its attributes (optional).
+  const openTagMatch = svgString.match(/^<svg\b([^>]*)>/i);
   if (!openTagMatch) return [];
 
   const attrs = openTagMatch[1];
@@ -86,14 +133,17 @@ function parseSvgManual(svgString: string): ElementContent[] {
 
 /**
  * Parse an attribute string like `width="16" height="16" viewBox="0 0 24 24"`
- * into a Properties object.
+ * into a Properties object. Supports double-quoted, single-quoted, and
+ * unquoted attribute values.
  */
 function parseAttributes(attrString: string): Properties {
   const props: Properties = {};
-  const re = /(\w[\w-]*)="([^"]*)"/g;
+  // Matches: name="value"  |  name='value'  |  name=value
+  const re = /(\w[\w-]*)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(attrString)) !== null) {
-    props[match[1]] = match[2];
+    const value = match[2] ?? match[3] ?? match[4] ?? '';
+    props[match[1]] = value;
   }
   return props;
 }
@@ -141,9 +191,29 @@ function parseInnerSvg(inner: string): ElementContent[] {
         });
         remaining = remaining.slice(openMatch[0].length).trim();
       } else {
-        // Find closing tag
+        // Find closing tag — search for the LAST occurrence to handle nested
+        // same-named elements correctly (previously used indexOf which broke
+        // on nested <g><g></g></g> patterns).
         const closeTag = `</${tagName}>`;
-        const closeIdx = remaining.indexOf(closeTag, openMatch[0].length);
+        let searchFrom = openMatch[0].length;
+        let closeIdx = -1;
+        let depth = 1;
+        while (searchFrom < remaining.length) {
+          const nextOpen = remaining.indexOf(`<${tagName}`, searchFrom);
+          const nextClose = remaining.indexOf(closeTag, searchFrom);
+          if (nextClose === -1) break;
+          if (nextOpen !== -1 && nextOpen < nextClose) {
+            depth++;
+            searchFrom = nextOpen + 1;
+          } else {
+            depth--;
+            if (depth === 0) {
+              closeIdx = nextClose;
+              break;
+            }
+            searchFrom = nextClose + 1;
+          }
+        }
         if (closeIdx !== -1) {
           const childContent = remaining.slice(openMatch[0].length, closeIdx);
           const childElements = parseInnerSvg(childContent);
@@ -184,11 +254,9 @@ function parseInnerSvg(inner: string): ElementContent[] {
  * Handler function — passed to `remark-rehype` via the `handlers` option.
  *
  * `state` is the mdast-util-to-hast state object (has `.all()`, `.patch()`,
- * `.applyData()` methods).  Typed loosely as `any` to avoid coupling to a
- * specific version of mdast-util-to-hast.
+ * `.applyData()` methods).
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function calloutToHast(state: any, node: CalloutNode): Element {
+export function calloutToHast(state: State, node: CalloutNode): Element {
   const data = node.data;
   const isFoldable = data.foldable !== false;
   const isClosed = data.foldable === 'closed';
@@ -200,7 +268,8 @@ export function calloutToHast(state: any, node: CalloutNode): Element {
 
   // Icon — parse SVG string into proper HAST elements so it renders
   // correctly without requiring `allowDangerousHtml` on the stringifier.
-  if (data.calloutIcon) {
+  // Honors `showIcon: false` (set on the node from config).
+  if (data.showIcon !== false && data.calloutIcon) {
     const svgChildren = svgToHast(data.calloutIcon);
     if (svgChildren.length > 0) {
       headerChildren.push({
@@ -215,8 +284,8 @@ export function calloutToHast(state: any, node: CalloutNode): Element {
     }
   }
 
-  // Title
-  if (data.calloutTitle) {
+  // Title — honors `showTitle: false` (set on the node from config).
+  if (data.showTitle !== false && data.calloutTitle) {
     headerChildren.push({
       type: 'element',
       tagName: 'span',
@@ -243,8 +312,11 @@ export function calloutToHast(state: any, node: CalloutNode): Element {
 
   // Transform MDAST children → HAST via the state's `all` method.
   // Falls back to empty array for empty callouts.
+  // Cast to `any` here because mdast-util-to-hast's `State.all` typing
+  // expects a `Root`/`Nodes`, but our custom `CalloutNode` extends `Parent`
+  // and is structurally compatible at runtime.
   const bodyChildren: ElementContent[] = state.all
-    ? (state.all(node) as ElementContent[])
+    ? (state.all(node as any) as ElementContent[])
     : [];
 
   const body: Element = {
@@ -261,17 +333,14 @@ export function calloutToHast(state: any, node: CalloutNode): Element {
       'callout',
       `callout-${data.calloutType}`,
       ...(isFoldable ? ['callout-foldable'] : []),
+      // Fallback for older browsers that don't support `:has()`.
+      // When the body has no children, add a `callout-empty` class so the
+      // CSS rule `.callout.callout-empty` can reset the header margin.
+      ...(bodyChildren.length === 0 ? ['callout-empty'] : []),
     ],
     'data-callout': data.calloutType,
     ...(isFoldable ? { 'data-callout-fold': isClosed ? 'closed' : 'open' } : {}),
     ...(data.hProperties?.style ? { style: data.hProperties.style as string } : {}),
-  };
-
-  const result: Element = {
-    type: 'element',
-    tagName,
-    properties,
-    children: [header, body],
   };
 
   // If foldable and open, add the `open` attribute to <details>.
@@ -280,12 +349,21 @@ export function calloutToHast(state: any, node: CalloutNode): Element {
   // them when the value is `true`. Without this, <details> renders without
   // `open` and appears collapsed despite `data-callout-fold="open"`.
   if (isFoldable && !isClosed) {
-    result.properties.open = true;
+    properties.open = true;
   }
 
-  // Apply position info and any extra hProperties from the node
-  if (state.patch) state.patch(node, result);
-  if (state.applyData) return state.applyData(node, result) as Element;
+  const result: Element = {
+    type: 'element',
+    tagName,
+    properties,
+    children: [header, body],
+  };
+
+  // Apply position info. We deliberately do NOT call `state.applyData`
+  // here because it would re-merge `node.data.hProperties` onto `result`
+  // (which we've already merged manually above) and could re-set
+  // `tagName` from `hName` (also already set). Single source of truth.
+  if (state.patch) state.patch(node as any, result);
 
   return result;
 }
