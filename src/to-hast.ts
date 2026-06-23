@@ -231,6 +231,22 @@ function parseInnerSvg(inner: string): ElementContent[] {
  */
 export function calloutToHast(state: State, node: CalloutNode): Element {
   const data = node.data;
+
+  // ── Route to specialized renderers for non-callout variants ───────────
+  // Literary types (epigraph, pullquote) → <figure><blockquote/><figcaption/></figure>
+  if (data.calloutType === 'epigraph' || data.calloutType === 'pullquote') {
+    return renderLiterary(state, node, data.calloutType as 'epigraph' | 'pullquote');
+  }
+  // Literary types (aside, sidebar) → <aside>[(<p class="{variant}-title"/>)? body...]</aside>
+  if (data.calloutType === 'aside' || data.calloutType === 'sidebar') {
+    return renderAside(state, node, data.calloutType as 'aside' | 'sidebar');
+  }
+  // Accordion panels ([!!] marker) → <details class="accordion" name="...">
+  if (data.calloutType === 'accordion') {
+    return renderAccordion(state, node);
+  }
+
+  // ── Standard callout rendering ────────────────────────────────────────
   const isFoldable = data.foldable !== false;
   const isClosed = data.foldable === 'closed';
   const tagName = isFoldable ? 'details' : (data.hName as string) || 'div';
@@ -358,5 +374,332 @@ export function calloutToHast(state: State, node: CalloutNode): Element {
   // `tagName` from `hName` (also already set). Single source of truth.
   if (state.patch) state.patch(node as any, result);
 
+  return result;
+}
+
+// ─── Accordion Icon Helper ─────────────────────────────────────────────────
+
+/**
+ * Render an accordion icon (emoji text or inline SVG string) as HAST content.
+ *
+ * If the icon looks like an SVG (starts with `<svg`), parse it via `svgToHast`
+ * into proper HAST elements. Otherwise (emoji, plain text), render as a text
+ * node. This avoids the `allowDangerousHtml` requirement that the original
+ * accordion version had.
+ */
+function renderAccordionIcon(icon: string): ElementContent[] {
+  if (icon.startsWith('<svg')) {
+    return svgToHast(icon);
+  }
+  return [{ type: 'text', value: icon } as HastText];
+}
+
+// ─── Literary Renderer (Epigraph + Pullquote) ─────────────────────────────
+
+/**
+ * Render a literary callout node (epigraph or pullquote) as:
+ *
+ *   <figure class="{variant}">
+ *     <blockquote class="{variant}-quote">
+ *       <p>Quote text...</p>
+ *     </blockquote>
+ *     <figcaption class="{variant}-attribution">— Author</figcaption>
+ *   </figure>
+ *
+ * Attribution is determined in this priority order:
+ *   1. Custom title from `[!EPIGRAPH] Author Name` (stored in data.calloutTitle)
+ *   2. Last body line that starts with `—`, `–`, or `--`
+ *   3. No attribution (just the quote)
+ */
+function renderLiterary(
+  state: State,
+  node: CalloutNode,
+  variant: 'epigraph' | 'pullquote'
+): Element {
+  const data = node.data;
+  let attribution: string | undefined =
+    data.calloutTitle && data.calloutTitle.length > 0
+      ? data.calloutTitle
+      : undefined;
+
+  let bodyMdast = node.children ? [...node.children] : [];
+
+  // If no explicit attribution, inspect the last paragraph for an em-dash
+  // attribution line.
+  if (!attribution && bodyMdast.length > 0) {
+    const last = bodyMdast[bodyMdast.length - 1];
+    if (last && (last as any).type === 'paragraph') {
+      const lastPara = last as { type: 'paragraph'; children: any[] };
+      const firstChild = lastPara.children[0];
+      if (firstChild && firstChild.type === 'text') {
+        const text = firstChild.value.replace(/\r\n/g, '\n');
+        const lines = text.split('\n');
+
+        let attrLineIdx = -1;
+        let attrText = '';
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const m = lines[i].match(/^\s*(?:--|—|–)\s*(.+)/);
+          if (m) {
+            attrLineIdx = i;
+            attrText = m[1].trim();
+            break;
+          }
+        }
+
+        if (attrLineIdx >= 0) {
+          attribution = attrText;
+          const bodyText = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
+          if (bodyText.length > 0) {
+            lastPara.children[0] = { ...firstChild, value: bodyText };
+          } else {
+            bodyMdast = bodyMdast.slice(0, -1);
+          }
+        }
+      }
+    }
+  }
+
+  const bodyNode = { ...node, children: bodyMdast };
+  const bodyChildren: ElementContent[] = state.all
+    ? (state.all(bodyNode as any) as ElementContent[])
+    : [];
+
+  const figureChildren: ElementContent[] = [
+    {
+      type: 'element',
+      tagName: 'blockquote',
+      properties: { className: [`${variant}-quote`] },
+      children: bodyChildren,
+    },
+  ];
+
+  if (attribution) {
+    figureChildren.push({
+      type: 'element',
+      tagName: 'figcaption',
+      properties: { className: [`${variant}-attribution`] },
+      children: [
+        { type: 'text', value: `— ${attribution}` } as HastText,
+      ],
+    });
+  }
+
+  const figure: Element = {
+    type: 'element',
+    tagName: 'figure',
+    properties: { className: [variant] },
+    children: figureChildren,
+  };
+
+  if (state.patch) state.patch(node as any, figure);
+  return figure;
+}
+
+// ─── Aside / Sidebar Renderer ─────────────────────────────────────────────
+
+/**
+ * Render an aside or sidebar callout node as:
+ *
+ *   <aside class="{variant}">
+ *     [<p class="{variant}-title">Title</p>]    ← only if custom title given
+ *     <div class="{variant}-body">{...children...}</div>
+ *     [<p class="{variant}-attribution">— Author</p>]   ← em-dash attribution
+ *   </aside>
+ */
+function renderAside(
+  state: State,
+  node: CalloutNode,
+  variant: 'aside' | 'sidebar'
+): Element {
+  const data = node.data;
+  const heading: string | undefined =
+    data.calloutTitle && data.calloutTitle.length > 0
+      ? data.calloutTitle
+      : undefined;
+
+  let bodyMdast = node.children ? [...node.children] : [];
+
+  // Attribution detection (same as renderLiterary)
+  let attribution: string | undefined;
+  if (bodyMdast.length > 0) {
+    const last = bodyMdast[bodyMdast.length - 1];
+    if (last && (last as any).type === 'paragraph') {
+      const lastPara = last as { type: 'paragraph'; children: any[] };
+      const firstChild = lastPara.children[0];
+      if (firstChild && firstChild.type === 'text') {
+        const text = firstChild.value.replace(/\r\n/g, '\n');
+        const lines = text.split('\n');
+
+        let attrLineIdx = -1;
+        let attrText = '';
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const m = lines[i].match(/^\s*(?:--|—|–)\s*(.+)/);
+          if (m) {
+            attrLineIdx = i;
+            attrText = m[1].trim();
+            break;
+          }
+        }
+
+        if (attrLineIdx >= 0) {
+          attribution = attrText;
+          const bodyText = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
+          if (bodyText.length > 0) {
+            lastPara.children[0] = { ...firstChild, value: bodyText };
+          } else {
+            bodyMdast = bodyMdast.slice(0, -1);
+          }
+        }
+      }
+    }
+  }
+
+  const bodyNode = { ...node, children: bodyMdast };
+  const bodyChildren: ElementContent[] = state.all
+    ? (state.all(bodyNode as any) as ElementContent[])
+    : [];
+
+  const asideChildren: ElementContent[] = [];
+
+  if (heading) {
+    asideChildren.push({
+      type: 'element',
+      tagName: 'p',
+      properties: { className: [`${variant}-title`] },
+      children: [{ type: 'text', value: heading } as HastText],
+    });
+  }
+
+  asideChildren.push({
+    type: 'element',
+    tagName: 'div',
+    properties: { className: [`${variant}-body`] },
+    children: bodyChildren,
+  });
+
+  if (attribution) {
+    asideChildren.push({
+      type: 'element',
+      tagName: 'p',
+      properties: { className: [`${variant}-attribution`] },
+      children: [{ type: 'text', value: `— ${attribution}` } as HastText],
+    });
+  }
+
+  const aside: Element = {
+    type: 'element',
+    tagName: 'aside',
+    properties: { className: [variant] },
+    children: asideChildren,
+  };
+
+  if (state.patch) state.patch(node as any, aside);
+  return aside;
+}
+
+// ─── Accordion Renderer ───────────────────────────────────────────────────
+
+/**
+ * Render an accordion panel node as:
+ *
+ *   <details class="accordion" name="accordion-group-N" [open]>
+ *     <summary class="accordion-header">
+ *       [<span class="accordion-icon">{icon}</span>]   ← only if icon provided
+ *       <span class="accordion-title">{title}</span>    ← only if title provided
+ *       <span class="accordion-chevron" aria-hidden="true"></span>
+ *     </summary>
+ *     <div class="accordion-body">{...children...}</div>
+ *   </details>
+ *
+ * Uses `svgToHast` for SVG icons and text nodes for emoji icons — does NOT
+ * require `allowDangerousHtml` on the stringifier.
+ */
+function renderAccordion(state: State, node: CalloutNode): Element {
+  const data = node.data;
+  const isOpen = data.foldable === 'open';
+  const groupId = data.accordionGroupId as string;
+
+  // ── Build summary (header) children ───────────────────────────────────
+  const summaryChildren: ElementContent[] = [];
+
+  // Optional icon — SVG icons via svgToHast, emoji/text via text node
+  if (data.calloutIcon) {
+    const iconChildren = renderAccordionIcon(data.calloutIcon);
+    if (iconChildren.length > 0) {
+      summaryChildren.push({
+        type: 'element',
+        tagName: 'span',
+        properties: {
+          className: ['accordion-icon'],
+          'aria-hidden': 'true',
+        },
+        children: iconChildren,
+      });
+    }
+  }
+
+  // Optional title
+  if (data.calloutTitle) {
+    summaryChildren.push({
+      type: 'element',
+      tagName: 'span',
+      properties: { className: ['accordion-title'] },
+      children: [{ type: 'text', value: data.calloutTitle } as HastText],
+    });
+  }
+
+  // Chevron — empty span, styled entirely via CSS
+  summaryChildren.push({
+    type: 'element',
+    tagName: 'span',
+    properties: {
+      className: ['accordion-chevron'],
+      'aria-hidden': 'true',
+    },
+    children: [],
+  });
+
+  const summary: Element = {
+    type: 'element',
+    tagName: 'summary',
+    properties: { className: ['accordion-header'] },
+    children: summaryChildren,
+  };
+
+  // ── Build body ────────────────────────────────────────────────────────
+  const bodyChildren: ElementContent[] = state.all
+    ? (state.all(node as any) as ElementContent[])
+    : [];
+
+  const body: Element = {
+    type: 'element',
+    tagName: 'div',
+    properties: { className: ['accordion-body'] },
+    children: bodyChildren,
+  };
+
+  // ── Assemble <details> root ───────────────────────────────────────────
+  const properties: Properties = {
+    className: ['accordion'],
+  };
+
+  // `name` attribute enables native exclusive expansion
+  if (groupId) {
+    properties.name = groupId;
+  }
+
+  const result: Element = {
+    type: 'element',
+    tagName: 'details',
+    properties,
+    children: [summary, body],
+  };
+
+  // `open` attribute — must be `true` (boolean), NOT `''` (empty string)
+  if (isOpen) {
+    properties.open = true;
+  }
+
+  if (state.patch) state.patch(node as any, result);
   return result;
 }

@@ -1458,11 +1458,9 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
     icon: ICONS.book,
     ...COLORS.purple,
   },
-  aside: {
-    defaultTitle: 'Aside',
-    icon: ICONS.messageSquare,
-    ...COLORS.purple,
-  },
+  // NOTE: `aside` was previously a callout-box type, but has been promoted
+  // to a literary type that renders as an <aside> HTML element. The routing
+  // lives in transform.ts / to-hast.ts alongside epigraph and pullquote.
   timeline: {
     defaultTitle: 'Timeline',
     icon: ICONS.clock,
@@ -1472,6 +1470,46 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
     defaultTitle: 'Bibliography',
     icon: ICONS.bookOpen,
     ...COLORS.purple,
+  },
+  related: {
+    defaultTitle: 'Related',
+    icon: ICONS.bookOpen,
+    ...COLORS.purple,
+  },
+  references: {
+    defaultTitle: 'References',
+    icon: ICONS.bookOpen,
+    ...COLORS.purple,
+  },
+  citation: {
+    defaultTitle: 'Citation',
+    icon: ICONS.bookOpen,
+    ...COLORS.purple,
+  },
+
+  // ── Literary type stubs ──────────────────────────────────────────────
+  // These have empty title/icon because they're rendered as <figure>/<aside>,
+  // not as callout boxes. The stubs exist so BUILT_IN_KEYS includes them.
+  epigraph: {
+    defaultTitle: '',
+    icon: '',
+    colorL: 0.5,
+    colorC: 0,
+    colorH: 0,
+  },
+  pullquote: {
+    defaultTitle: '',
+    icon: '',
+    colorL: 0.5,
+    colorC: 0,
+    colorH: 0,
+  },
+  pull: {
+    defaultTitle: '',
+    icon: '',
+    colorL: 0.5,
+    colorC: 0,
+    colorH: 0,
   },
 
   // ── experimental / ai-model ──────────────────────────────────────────

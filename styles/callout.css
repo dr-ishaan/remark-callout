@@ -233,4 +233,568 @@
   .callout-foldable > .callout-header::after {
     display: none;
   }
+}/* ─── Literary family (Epigraph + Pullquote) ────────────────────────────── */
+/* Both render as <figure><blockquote/><figcaption/></figure> with NO callout
+   DNA — no border, no background, no icon, no title bar. Pure typography.
+   Epigraph is the large article-opener; Pullquote is the mid-article
+   scanner-bait variant. [!PULL] is an alias of [!PULLQUOTE]. */
+
+/* ── Epigraph (large, opens an article) ─────────────────────────────────── */
+
+.epigraph {
+  margin: 2.5em auto;
+  padding: 0;
+  max-width: 85%;
+  border: none;
+  background: none;
+  border-radius: 0;
+  text-align: center;
+  font-style: italic;
+  font-weight: 500;
+  color: oklch(0.25 0 0);
+}
+
+.epigraph-quote {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 1.4rem;
+  line-height: 1.7;
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.epigraph-quote > *:first-child {
+  margin-top: 0;
+}
+
+.epigraph-quote > *:last-child {
+  margin-bottom: 0;
+}
+
+.epigraph-quote p {
+  margin: 0;
+}
+
+.epigraph-quote p + p {
+  margin-top: 0.75em;
+}
+
+.epigraph-attribution {
+  margin-top: 0.8em;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  color: oklch(0.35 0 0);
+  text-align: center;
+}
+
+/* ── Pullquote (smaller, mid-article scanner bait) ──────────────────────── */
+/* Same DNA as epigraph, scaled down. Center-aligned to match. */
+
+.pullquote {
+  margin: 1.75em auto;
+  padding: 0;
+  max-width: 75%;
+  border: none;
+  background: none;
+  border-radius: 0;
+  text-align: center;
+  font-style: italic;
+  font-weight: 500;
+  color: oklch(0.3 0 0);
+}
+
+.pullquote-quote {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 1.15rem;
+  line-height: 1.7;
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.pullquote-quote > *:first-child {
+  margin-top: 0;
+}
+
+.pullquote-quote > *:last-child {
+  margin-bottom: 0;
+}
+
+.pullquote-quote p {
+  margin: 0;
+}
+
+.pullquote-quote p + p {
+  margin-top: 0.6em;
+}
+
+.pullquote-attribution {
+  margin-top: 0.6em;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  color: oklch(0.4 0 0);
+  text-align: center;
+}
+
+/* ─── Print ────────────────────────────────────────────────────────────── */
+
+@media print {
+  .callout {
+    border-left-width: 3px;
+    break-inside: avoid;
+  }
+
+  .callout-foldable > .callout-body {
+    display: block !important;
+  }
+
+  .callout-foldable > .callout-header::after {
+    display: none;
+  }
+}
+
+/* ─── Aside / Sidebar (literary family — tangential content) ─────────────── */
+/* Both render as <aside> with no callout DNA — tinted background, no icon,
+   no colored title bar, no foldable. The optional custom title from
+   `[!ASIDE] Heading` becomes a small heading paragraph; an optional trailing
+   `— Author` line becomes an attribution paragraph.
+
+   Aside   = compact marginal note, narrow, italic, soft tint.
+   Sidebar = magazine-style content box, wider, more padding, sans-serif. */
+
+/* ── Aside (compact marginal note) ──────────────────────────────────────── */
+
+.aside {
+  margin: 1.5em auto;
+  max-width: 70%;
+  padding: 0.75em 1.25em;
+  background: oklch(0.96 0.01 280);
+  border-left: 3px solid oklch(0.7 0.04 280);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: oklch(0.32 0 0);
+}
+
+.aside-title {
+  margin: 0 0 0.4em;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: oklch(0.4 0.05 280);
+}
+
+.aside-body {
+  margin: 0;
+}
+
+.aside-body > *:first-child {
+  margin-top: 0;
+}
+
+.aside-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.aside-body p {
+  margin: 0.4em 0;
+}
+
+.aside-body p + p {
+  margin-top: 0.6em;
+}
+
+.aside-attribution {
+  margin: 0.6em 0 0;
+  font-size: 0.82rem;
+  font-style: italic;
+  color: oklch(0.45 0 0);
+  text-align: right;
+}
+
+/* ── Sidebar (magazine-style content box) ───────────────────────────────── */
+/* Wider than aside, more padding, sans-serif, stronger background tint.
+   Designed for longer tangential content — a few paragraphs or a list. */
+
+.sidebar {
+  margin: 2em auto;
+  max-width: 85%;
+  padding: 1.25em 1.5em;
+  background: oklch(0.94 0.015 250);
+  border: 1px solid oklch(0.82 0.02 250);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: oklch(0.28 0 0);
+  box-shadow: 0 1px 3px oklch(0.5 0 0 / 0.06);
+}
+
+.sidebar-title {
+  margin: 0 0 0.6em;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: oklch(0.22 0.03 250);
+  border-bottom: 1px solid oklch(0.82 0.02 250);
+  padding-bottom: 0.4em;
+}
+
+.sidebar-body {
+  margin: 0;
+}
+
+.sidebar-body > *:first-child {
+  margin-top: 0;
+}
+
+.sidebar-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.sidebar-body p {
+  margin: 0.5em 0;
+}
+
+.sidebar-body p + p {
+  margin-top: 0.75em;
+}
+
+.sidebar-body ul,
+.sidebar-body ol {
+  padding-left: 1.25em;
+  margin: 0.5em 0;
+}
+
+.sidebar-attribution {
+  margin: 0.8em 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-style: normal;
+  color: oklch(0.4 0.02 250);
+  text-align: right;
+}
+
+/* ── Dark mode for aside / sidebar ──────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  .aside {
+    background: oklch(0.25 0.015 280);
+    border-left-color: oklch(0.55 0.05 280);
+    color: oklch(0.85 0 0);
+  }
+
+  .aside-title {
+    color: oklch(0.78 0.05 280);
+  }
+
+  .aside-attribution {
+    color: oklch(0.7 0 0);
+  }
+
+  .sidebar {
+    background: oklch(0.27 0.02 250);
+    border-color: oklch(0.4 0.03 250);
+    color: oklch(0.88 0 0);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
+  }
+
+  .sidebar-title {
+    color: oklch(0.88 0.04 250);
+    border-bottom-color: oklch(0.4 0.03 250);
+  }
+
+  .sidebar-attribution {
+    color: oklch(0.72 0.02 250);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * ACCORDION FAMILY — `[!!]` marker
+ *
+ * A separate visual family from callouts. No callout DNA: no left-border
+ * accent, no colored chrome, no type-driven color theming. The only color
+ * comes from the user-supplied icon (emoji or inline SVG).
+ *
+ * Syntax:
+ *   > [!!] Title                          ← bare, default closed
+ *   > [!!] [! 💻 !] Laptop                ← emoji icon + title
+ *   > [!!] [! <svg>...</svg> !] Custom    ← SVG icon + title
+ *   > [!!]+ [! 💻 !] Laptop               ← forced open
+ *   > [!!]- [! 💻 !] Laptop               ← forced closed (same as default)
+ *
+ * Adjacent `[!!]` panels form a group with:
+ *   - Shared borders (no gap between panels, single 1px divider)
+ *   - Native exclusive expansion via `<details name="...">` — opening one
+ *     panel closes the others in the same group, zero JavaScript.
+ *
+ * Visual reference: clean card-based accordion. White container, 12px radius,
+ * light gray 1px borders, soft shadow. Open panel body has a subtle tinted
+ * background. Chevron rotates 90deg when open.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --accordion-radius: 12px;
+  --accordion-border-color: #e5e7eb;
+  --accordion-bg: #ffffff;
+  --accordion-body-bg: #f9fafb;
+  --accordion-header-padding: 14px 20px;
+  --accordion-body-padding: 16px 20px;
+  --accordion-title-color: #111827;
+  --accordion-title-font-size: 0.95rem;
+  --accordion-title-font-weight: 500;
+  --accordion-chevron-color: #6b7280;
+  --accordion-icon-size: 1.25rem;
+  --accordion-gap: 0.625rem;
+  --accordion-hover-bg: #f9fafb;
+  --accordion-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+/* ── Group container: wraps adjacent accordion panels ──────────────────── */
+/* The transform doesn't emit a wrapper div — adjacent <details> siblings
+ * are styled as a group via :first-child / :last-child selectors below.
+ * This keeps the HTML clean and lets the native <details name="..."> handle
+ * exclusive expansion without any wrapper interfering. */
+
+/* ── Base accordion panel ──────────────────────────────────────────────── */
+
+.accordion {
+  background: var(--accordion-bg);
+  border: 1px solid var(--accordion-border-color);
+  margin: 0;
+  /* No border-radius here — radius is applied to first/last children only
+   * so adjacent panels share a flat divider between them. */
+}
+
+/* Adjacent accordions share a single 1px divider — collapse the top border
+ * of every panel that follows another accordion. */
+.accordion + .accordion {
+  border-top: none;
+}
+
+/* First panel in a group gets rounded top corners, shadow, and top margin
+ * to separate the group from preceding content. */
+.accordion:first-child {
+  border-top-left-radius: var(--accordion-radius);
+  border-top-right-radius: var(--accordion-radius);
+  box-shadow: var(--accordion-shadow);
+  margin-top: 1.25em;
+}
+
+/* Last panel in a group gets rounded bottom corners and bottom margin
+ * to separate the group from following content. */
+.accordion:last-child {
+  border-bottom-left-radius: var(--accordion-radius);
+  border-bottom-right-radius: var(--accordion-radius);
+  margin-bottom: 1.25em;
+}
+
+/* Lone accordion (no siblings) gets all four corners rounded. */
+.accordion:only-child {
+  border-radius: var(--accordion-radius);
+}
+
+/* ── Header (summary) ──────────────────────────────────────────────────── */
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  gap: var(--accordion-gap);
+  padding: var(--accordion-header-padding);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;          /* remove default <summary> triangle */
+  outline: none;
+  transition: background-color 0.12s ease;
+}
+
+/* Remove the default disclosure triangle in WebKit / Blink. */
+.accordion-header::-webkit-details-marker {
+  display: none;
+}
+
+/* Hover affordance — subtle tinted background on the header. */
+.accordion:not([open]) .accordion-header:hover {
+  background: var(--accordion-hover-bg);
+}
+
+/* Focus ring for keyboard navigation. */
+.accordion-header:focus-visible {
+  box-shadow: inset 0 0 0 2px oklch(0.55 0.15 250);
+}
+
+/* ── Icon ──────────────────────────────────────────────────────────────── */
+
+.accordion-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--accordion-icon-size);
+  height: var(--accordion-icon-size);
+  flex-shrink: 0;
+  line-height: 1;
+  /* Icon color comes from the icon itself (emoji inherent color or SVG fill).
+   * We do NOT colorize via currentColor — the chrome is neutral. */
+}
+
+.accordion-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── Title ─────────────────────────────────────────────────────────────── */
+
+.accordion-title {
+  flex: 1 1 auto;
+  font-size: var(--accordion-title-font-size);
+  font-weight: var(--accordion-title-font-weight);
+  color: var(--accordion-title-color);
+  line-height: 1.4;
+}
+
+/* ── Chevron (pure CSS, no JS) ─────────────────────────────────────────── */
+/* A right-pointing triangle made from a rotated border. Rotates 90deg when
+ * the panel is open. */
+
+.accordion-chevron {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid var(--accordion-chevron-color);
+  border-bottom: 2px solid var(--accordion-chevron-color);
+  transform: rotate(-45deg);          /* points right when closed */
+  transition: transform 0.18s ease;
+  margin-left: auto;                  /* push to far right of the header */
+}
+
+/* When the panel is open, rotate the chevron to point down. */
+.accordion[open] .accordion-chevron {
+  transform: rotate(45deg);
+}
+
+/* ── Body ──────────────────────────────────────────────────────────────── */
+
+.accordion-body {
+  padding: var(--accordion-body-padding);
+  background: var(--accordion-body-bg);
+  border-top: 1px solid var(--accordion-border-color);
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: #374151;
+}
+
+/* Body content spacing — paragraphs, lists, code blocks. */
+.accordion-body > *:first-child {
+  margin-top: 0;
+}
+
+.accordion-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.accordion-body p {
+  margin: 0.6em 0;
+}
+
+.accordion-body ul,
+.accordion-body ol {
+  padding-left: 1.5em;
+  margin: 0.6em 0;
+}
+
+.accordion-body li + li {
+  margin-top: 0.25em;
+}
+
+.accordion-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+
+.accordion-body pre {
+  background: #1f2937;
+  color: #f9fafb;
+  padding: 0.85em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.accordion-body pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85rem;
+  color: inherit;
+}
+
+/* ── Open-state animation (progressive enhancement) ────────────────────── */
+/* Native <details> doesn't animate open/close. We add a subtle fade-in on
+ * the body when the panel opens. Close is instant (animating close would
+ * require JS to delay the `open` attribute removal). */
+
+.accordion[open] .accordion-body {
+  animation: accordion-body-fade-in 0.18s ease-out;
+}
+
+@keyframes accordion-body-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Spacing between accordion groups and surrounding content ─────────── */
+/* When an accordion directly follows another accordion (i.e., they're in
+ * the same group), the second one gets no top margin — they share a border.
+ * (The first-child / last-child top/bottom margins are declared above with
+ * the corner-radius rules.) */
+.accordion + .accordion {
+  margin-top: 0;
+}
+
+/* ── Dark mode ─────────────────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accordion-border-color: #374151;
+    --accordion-bg: #1f2937;
+    --accordion-body-bg: #111827;
+    --accordion-title-color: #f9fafb;
+    --accordion-chevron-color: #9ca3af;
+    --accordion-hover-bg: #283548;
+    --accordion-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .accordion-body {
+    color: #d1d5db;
+  }
+
+  .accordion-body code {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .accordion-body pre {
+    background: #111827;
+    color: #e5e7eb;
+  }
+
+  .accordion-header:focus-visible {
+    box-shadow: inset 0 0 0 2px oklch(0.7 0.15 250);
+  }
 }

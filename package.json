@@ -21,11 +21,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node tests/test-bugs.mjs && node tests/test-fixes.mjs && node tests/test-edge-probe.mjs && node tests/test-crlf.mjs",
+    "test": "node tests/test-bugs.mjs && node tests/test-fixes.mjs && node tests/test-edge-probe.mjs && node tests/test-crlf.mjs && node tests/test-accordion.mjs && node tests/test-literary.mjs",
     "test:bugs": "node tests/test-bugs.mjs",
     "test:fixes": "node tests/test-fixes.mjs",
     "test:edge": "node tests/test-edge-probe.mjs",
     "test:crlf": "node tests/test-crlf.mjs",
+    "test:accordion": "node tests/test-accordion.mjs",
+    "test:literary": "node tests/test-literary.mjs",
     "test:stress": "node tests/test-stress-2.mjs",
     "test:stress:full": "node tests/test-stress-1.mjs && node tests/test-stress-2.mjs",
     "prepublishOnly": "npm run build"
