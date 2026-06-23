@@ -1,7 +1,7 @@
 {
   "name": "remark-callout",
-  "version": "1.0.0",
-  "description": "Remark plugin for GitHub/Obsidian-style callouts in the unified pipeline. Transforms [!TYPE] blockquotes into styled HTML containers with SVG icons, oklch colors, and optional collapsible support.",
+  "version": "1.1.0",
+  "description": "Remark plugin for GitHub/Obsidian-style callouts, literary types (epigraph/pullquote/aside/sidebar), and accordions with native exclusive expansion. Transforms [!TYPE] blockquotes into styled HTML containers with SVG icons, oklch colors, rich titles, and collapsible support.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -21,15 +21,6 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node tests/test-bugs.mjs && node tests/test-fixes.mjs && node tests/test-edge-probe.mjs && node tests/test-crlf.mjs && node tests/test-accordion.mjs && node tests/test-literary.mjs",
-    "test:bugs": "node tests/test-bugs.mjs",
-    "test:fixes": "node tests/test-fixes.mjs",
-    "test:edge": "node tests/test-edge-probe.mjs",
-    "test:crlf": "node tests/test-crlf.mjs",
-    "test:accordion": "node tests/test-accordion.mjs",
-    "test:literary": "node tests/test-literary.mjs",
-    "test:stress": "node tests/test-stress-2.mjs",
-    "test:stress:full": "node tests/test-stress-1.mjs && node tests/test-stress-2.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -43,8 +34,14 @@
     "github",
     "mdx",
     "markdown",
-    "ast"
+    "ast",
+    "accordion",
+    "epigraph",
+    "pullquote",
+    "aside",
+    "sidebar"
   ],
+  "author": "dr-ishaan",
   "license": "MIT",
   "peerDependencies": {
     "mdast-util-to-hast": "^13.0.0",

@@ -358,35 +358,9 @@ npm install
 # Build TypeScript → dist/
 npm run build
 
-# Run the test suite
-npm test
-
-# Run individual test suites
-npm run test:bugs
-npm run test:fixes
-npm run test:edge
-npm run test:crlf
-npm run test:accordion
-npm run test:literary
-
-# Run stress tests
-npm run test:stress        # 10k pipeline iterations
-npm run test:stress:full   # 2M+ per-callout iterations (~3 minutes)
+# Watch mode for development
+npm run dev
 ```
-
-### Test Suite
-
-| File | Description | Assertions |
-|---|---|---|
-| `tests/test-bugs.mjs` | Original bug-fix tests | 86 |
-| `tests/test-fixes.mjs` | Phase 2 audit fix verification | 38 |
-| `tests/test-edge-probe.mjs` | Permanent edge-case probe | 70 |
-| `tests/test-crlf.mjs` | CRLF / CR line-ending tests | 35 |
-| `tests/test-accordion.mjs` | Accordion family tests | 27 |
-| `tests/test-literary.mjs` | Literary type tests (epigraph, pullquote, aside, sidebar) | 40 |
-| `tests/test-stress-1.mjs` | Per-callout × 10k iterations | 2,240,868 |
-| `tests/test-stress-2.mjs` | Full pipeline × 10k iterations | 16,000 |
-| `tests/test-stress-new-features.mjs` | Accordion + literary × 100k iterations | 250,262 |
 
 ## License
 
