@@ -40,20 +40,27 @@ async function run(md, opts = {}) {
     .process(md));
 }
 
-// ── EDGE 1: Underscore in type name ────────────────────────────────────────
-// \w matches underscore, so [!BEST_PRACTICE] matches the regex.
-// It's not in BUILT_IN_CALLOUTS, so it renders with the fallback path.
-// See issue #4 for discussion of whether to tighten this.
-console.log('── EDGE 1: underscore in type name ──');
+// ── EDGE 1: Underscore in type name (issue #4 — now rejected) ─────────────
+// The regex was tightened in issue #4 to only allow letters, digits, and
+// hyphens. Underscores and leading digits are NO LONGER matched.
+//   [!BEST_PRACTICE] → does NOT match (underscore rejected)
+//   [!123TYPE]        → does NOT match (leading digit rejected)
+//   [!best-practice]  → matches (hyphens still allowed)
+console.log('── EDGE 1: underscore in type name (issue #4 — rejected) ──');
 {
+  // Underscore no longer matches — treated as a plain blockquote
   const html = await run('> [!BEST_PRACTICE]\n> body');
-  ok('underscore type matches regex', html.includes('callout-best_practice'),
+  ok('underscore type does NOT match (issue #4)', !html.includes('callout-best_practice'),
      `html: ${html.slice(0, 200)}`);
-  // capitalize() splits on '-' only, so 'best_practice' → 'Best_practice'
-  // (NOT 'Best Practice'). This is current-behavior; issue #4 tracks the fix.
-  const title = html.match(/callout-title[^>]*>([^<]+)/)?.[1];
-  ok('underscore type title is `Best_practice` (current behavior)', title === 'Best_practice',
-     `got: "${title}"`);
+  ok('underscore type renders as plain blockquote', html.includes('<blockquote>') || !html.includes('class="callout'));
+
+  // Leading digit also rejected
+  const html2 = await run('> [!123TYPE]\n> body');
+  ok('leading-digit type does NOT match (issue #4)', !html2.includes('callout-123type'));
+
+  // Hyphens still work (regression check)
+  const html3 = await run('> [!BEST-PRACTICE]\n> body');
+  ok('hyphenated type still matches', html3.includes('callout-best-practice'));
 }
 
 // ── EDGE 2: Tab character after marker ─────────────────────────────────────

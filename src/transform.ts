@@ -23,7 +23,9 @@ import { BUILT_IN_CALLOUTS } from './defaults.js';
  *   [!BEST-PRACTICE]+ Expandable
  *
  * Captures:
- *   1 → type key  (e.g., "NOTE", "WARNING", "BEST-PRACTICE") — may include hyphens
+ *   1 → type key  (e.g., "NOTE", "WARNING", "BEST-PRACTICE") — letters,
+ *       digits, and hyphens only. First char must be a letter. Underscores
+ *       and leading digits are NOT allowed (issue #4) — use hyphens instead.
  *   2 → foldable  ("+" or "-" or undefined) — comes AFTER the closing bracket
  *   3 → title     (everything after optional foldable char, trimmed)
  *
@@ -33,7 +35,7 @@ import { BUILT_IN_CALLOUTS } from './defaults.js';
  * text after it can be extracted by `transformBlockquote` rather than
  * being captured as the title.
  */
-const CALLOUT_RE = /^\[!([\w-]+)\]([\+\-])?[^\S\n]*(.*)/;
+const CALLOUT_RE = /^\[!([A-Za-z][A-Za-z0-9-]*)\]([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Parse a text value for a callout marker.
