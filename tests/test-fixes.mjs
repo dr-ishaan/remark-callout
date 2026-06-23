@@ -6,8 +6,8 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
-import remarkCallout, { calloutToHast, BUILT_IN_KEYS } from './dist/index.js';
-import { resolveConfig } from './dist/transform.js';
+import remarkCallout, { calloutToHast, BUILT_IN_KEYS } from '../dist/index.js';
+import { resolveConfig } from '../dist/transform.js';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  PASS:', m); } else { fail++; console.log('  FAIL:', m); } };

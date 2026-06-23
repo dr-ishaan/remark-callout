@@ -7,7 +7,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
-import remarkCallout, { calloutToHast, BUILT_IN_KEYS, BUILT_IN_CALLOUTS } from './dist/index.js';
+import remarkCallout, { calloutToHast, BUILT_IN_KEYS, BUILT_IN_CALLOUTS } from '../dist/index.js';
 
 const ITERATIONS_PER_TYPE = 10000;
 
@@ -133,7 +133,10 @@ if (totalFail > 0) {
 
 // Write JSON summary for aggregation
 import { writeFileSync } from 'node:fs';
-writeFileSync(`/home/z/my-project/stress1-chunk-${START}-${END}.json`, JSON.stringify({
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+writeFileSync(join(__dirname, `stress1-chunk-${START}-${END}.json`), JSON.stringify({
   chunk: `${START}-${END}`,
   types: subset.length,
   invocations: subset.length * ITERATIONS_PER_TYPE,
