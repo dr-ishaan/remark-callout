@@ -1,5 +1,5 @@
 import type { Properties } from 'hast';
-import type { Parent } from 'mdast';
+import type { Parent, PhrasingContent } from 'mdast';
 
 /**
  * Foldable state for a callout.
@@ -95,7 +95,11 @@ export interface CalloutNode extends Parent {
   type: 'callout';
   data: {
     calloutType: string;
+    /** Plain-text title (used when calloutTitleNodes is empty/undefined) */
     calloutTitle: string;
+    /** Rich title nodes (inline MDAST). When non-empty, rendered via state.all
+     *  into the title span instead of calloutTitle text. */
+    calloutTitleNodes?: PhrasingContent[];
     calloutIcon: string;
     foldable: Foldable;
     showTitle: boolean;
@@ -111,8 +115,11 @@ export interface CalloutNode extends Parent {
 export interface ParsedCallout {
   /** Lowercase type key (e.g., 'note', 'warning') */
   type: string;
-  /** Custom title (empty string if none) */
+  /** Custom title (empty string if none) — plain text portion only */
   title: string;
+  /** Rich title nodes (inline MDAST from the marker line). Empty if the
+   *  marker line had no inline content after the marker text. */
+  titleNodes: PhrasingContent[];
   /** Foldable state */
   foldable: Foldable;
   /** Length of the full marker including title, for slicing the text node */

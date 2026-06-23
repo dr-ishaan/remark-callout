@@ -19,7 +19,25 @@ A [remark](https://github.com/remarkjs/remark) plugin for the unified pipeline t
 
 > [!DANGER]-
 > Collapsible, closed by default.
+
+> [!NOTE] **Rich title** with `inline code` and [links](https://example.com)
+> Body text on the next line.
 ```
+
+### Rich titles
+
+Inline markdown on the marker line (after `[!TYPE]`) is rendered as HTML inside the title span:
+
+| Input | Rendered title |
+|---|---|
+| `> [!NOTE] **bold**` | `<strong>bold</strong>` |
+| `> [!NOTE] mixed **bold** text` | `mixed <strong>bold</strong> text` |
+| `> [!NOTE] [link](http://x)` | `<a href="http://x">link</a>` |
+| `> [!NOTE] \`code\`` | `<code>code</code>` |
+| `> [!NOTE] plain text` | `plain text` |
+| `> [!NOTE]` (nothing) | `Note` (default from config) |
+
+Content on subsequent lines (after a newline) is body content, not title.
 
 ## Features
 
@@ -27,8 +45,10 @@ A [remark](https://github.com/remarkjs/remark) plugin for the unified pipeline t
 - **SVG icons** — Lucide-style, 24×24 viewBox, stroke-based, using `currentColor`
 - **oklch colors** — perceptually uniform, automatic dark mode via `prefers-color-scheme`
 - **Collapsible callouts** — native `<details>`/`<summary>` with `+` (open) / `-` (closed) syntax, zero JavaScript
+- **Rich titles** — inline markdown in the title (bold, italic, links, code) renders as HTML in the title span
 - **Case-insensitive** type matching — `[!NOTE]`, `[!note]`, `[!NoTe]` all work
 - **Hyphenated types** — `[!BEST-PRACTICE]`, `[!RATE-LIMIT]`, `[!CI-CD]`
+- **CRLF-compatible** — Windows (`\r\n`), old Mac (`\r`), and Unix (`\n`) line endings all work
 - **Custom callout types** — define your own with `callouts`, `icons`, `titles` options
 - **Single-pass recursive transformer** — handles arbitrarily deep nesting with no cap
 
@@ -214,7 +234,8 @@ npm run test:stress
 |---|---|---|
 | `tests/test-bugs.mjs` | Original bug-fix tests | 86 |
 | `tests/test-fixes.mjs` | Phase 2 audit fix verification | 38 |
-| `tests/test-edge-probe.mjs` | Permanent edge-case probe | 63 |
+| `tests/test-edge-probe.mjs` | Permanent edge-case probe | 70 |
+| `tests/test-crlf.mjs` | CRLF / CR line-ending tests | 35 |
 | `tests/test-stress-1.mjs` | Per-callout × 10k iterations | 2,240,868 |
 | `tests/test-stress-2.mjs` | Full pipeline × 10k iterations | 16,000 |
 

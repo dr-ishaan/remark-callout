@@ -21,19 +21,21 @@ async function run(md, opts = {}) {
     .process(md));
 }
 
-// ── BUG #1: inline non-text children after marker preserved ──
-console.log('\n=== BUG #1: inline children preserved ===');
+// ── BUG #1 + Issue #3: inline non-text children become rich title ──
+console.log('\n=== BUG #1 + Issue #3: inline children → rich title ===');
 {
+  // With issue #3, inline content after the marker on the SAME LINE
+  // becomes the rich title (rendered as HTML in the title span), NOT body.
   const html = await run('> [!NOTE] **bold** text');
-  ok(html.includes('<strong>bold</strong>'), 'bold preserved in body');
-  ok(html.includes('text'), 'trailing text preserved');
-  ok(html.includes('callout-title">Note'), 'title is "Note" (default), not "bold"');
+  ok(html.includes('<strong>bold</strong>'), 'bold rendered in title span');
+  ok(html.includes('text'), 'trailing text in title span');
+  ok(!/callout-body[^>]*>\s*<strong>/.test(html), 'bold NOT in body (now in title)');
 
   const html2 = await run('> [!NOTE] [link](http://x)');
-  ok(html2.includes('<a href="http://x">link</a>'), 'link preserved in body');
+  ok(html2.includes('<a href="http://x">link</a>'), 'link rendered in title span');
 
   const html3 = await run('> [!NOTE] `code`');
-  ok(html3.includes('<code>code</code>'), 'inline code preserved in body');
+  ok(html3.includes('<code>code</code>'), 'inline code rendered in title span');
 }
 
 // ── BUG #2: showTitle / showIcon respected ──
