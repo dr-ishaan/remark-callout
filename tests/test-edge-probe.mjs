@@ -93,29 +93,36 @@ console.log('\n── EDGE 5: empty foldable callout ──');
   ok('empty foldable has callout-empty class', html.includes('callout-empty'));
 }
 
-// ── EDGE 6: Title with markdown formatting ─────────────────────────────────
-// CURRENT BEHAVIOR (tracked in issue #3):
-//   remark-parse parses **bold** into a `strong` MDAST node BEFORE our
-//   transformer runs. The regex `(.*)` only captures the leading text node,
-//   so the bold content "leaks" into the body. The split-point between
-//   title and body is inconsistent when the title contains inline markdown.
+// ── EDGE 6: Title with markdown formatting (rich titles, issue #3) ────────
+// With issue #3, inline markdown on the marker line becomes a RICH TITLE
+// rendered as HTML in the title span:
+//   - `> [!NOTE] **bold title**` → title span contains `<strong>bold title</strong>`
+//   - `> [!NOTE] mixed **bold** text` → title span contains `mixed <strong>bold</strong> text`
+//   - `> [!NOTE] [link](http://x)` → title span contains `<a href="...">link</a>`
 //
-//   - `> [!NOTE] **bold title**` → title is `Note` (default), body is `<strong>bold title</strong>`
-//   - `> [!NOTE] mixed **bold** text` → title is `mixed`, body is `<strong>bold</strong> text`
-//
-// These tests document the current behavior. When issue #3 is resolved,
-// these expectations should be updated (or moved to a "rich-title" test file).
-console.log('\n── EDGE 6: title with markdown formatting (current behavior, see issue #3) ──');
+// Content on subsequent lines (after a newline) is body, NOT title.
+console.log('\n── EDGE 6: title with markdown formatting (rich titles, issue #3) ──');
 {
   const html = await run('> [!NOTE] **bold title**\n> body');
-  // Title falls back to default `Note` because the leading text node is empty
-  // (remark-parse already split the `**bold title**` into a `strong` node).
-  const title = html.match(/callout-title[^>]*>([^<]*)/)?.[1];
-  ok('markdown title falls back to default (issue #3)', title === 'Note',
-     `got: "${title}"`);
-  // The bold content ends up in the body via the BUG #1 fix (no content dropped).
-  ok('markdown title content preserved in body', html.includes('<strong>bold title</strong>'),
+  // Title span should contain the rendered bold, NOT the default "Note"
+  ok('rich title: bold in title span', html.includes('callout-title"><strong>bold title</strong>'),
      `html: ${html.slice(0, 400)}`);
+  // Body should contain "body" (from next line), NOT the bold
+  ok('rich title: body text in body', html.includes('callout-body') && html.includes('>body<'));
+  ok('rich title: bold NOT in body', !/callout-body[\s\S]*<strong>/.test(html));
+
+  const html2 = await run('> [!NOTE] mixed **bold** text\n> body');
+  // Title span should contain the text "mixed", the bold, and "text" —
+  // note remark-rehype may collapse leading/trailing whitespace inside
+  // inline content, so we check for the three components separately.
+  ok('rich title: mixed text in title', html2.includes('callout-title">mixed'),
+     `html: ${html2.slice(0, 400)}`);
+  ok('rich title: bold in mixed title', html2.includes('<strong>bold</strong>'));
+  ok('rich title: trailing text in mixed title', /callout-title[\s\S]*<strong>bold<\/strong>[\s\S]*text/.test(html2));
+
+  const html3 = await run('> [!NOTE] [link](http://x)\n> body');
+  ok('rich title: link in title span', html3.includes('callout-title"><a href="http://x">link</a>'),
+     `html: ${html3.slice(0, 400)}`);
 }
 
 // ── EDGE 7: Title with HTML chars (XSS probe) ──────────────────────────────

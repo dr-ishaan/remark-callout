@@ -258,18 +258,38 @@ export function calloutToHast(state: State, node: CalloutNode): Element {
   }
 
   // Title — honors `showTitle: false` (set on the node from config).
-  if (data.showTitle !== false && data.calloutTitle) {
-    headerChildren.push({
-      type: 'element',
-      tagName: 'span',
-      properties: { className: ['callout-title'] },
-      children: [
-        {
-          type: 'text',
-          value: data.calloutTitle,
-        } as HastText,
-      ],
-    });
+  // If `calloutTitleNodes` is set (rich title from issue #3), render the
+  // inline MDAST nodes via state.all into the title span. Otherwise, fall
+  // back to the plain-text `calloutTitle`.
+  if (data.showTitle !== false) {
+    let titleChildren: ElementContent[] | null = null;
+
+    if (data.calloutTitleNodes && data.calloutTitleNodes.length > 0) {
+      // Rich title: wrap titleNodes in a temporary paragraph and transform
+      // via state.all. This converts MDAST inline nodes (strong, em, link,
+      // code, etc.) into proper HAST elements inside the title span.
+      const tempParagraph = { type: 'paragraph', children: data.calloutTitleNodes };
+      const transformed = state.all
+        ? (state.all(tempParagraph as any) as ElementContent[])
+        : [];
+      if (transformed.length > 0) {
+        titleChildren = transformed;
+      }
+    }
+
+    if (!titleChildren && data.calloutTitle) {
+      // Plain-text fallback
+      titleChildren = [{ type: 'text', value: data.calloutTitle } as HastText];
+    }
+
+    if (titleChildren && titleChildren.length > 0) {
+      headerChildren.push({
+        type: 'element',
+        tagName: 'span',
+        properties: { className: ['callout-title'] },
+        children: titleChildren,
+      });
+    }
   }
 
   // ── Build header element ───────────────────────────────────────────────

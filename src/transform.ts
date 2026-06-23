@@ -58,6 +58,7 @@ export function parseCalloutMarker(
   return {
     type,
     title: (title ?? '').trim(),
+    titleNodes: [],  // populated by transformBlockquote from MDAST inline children
     foldable,
     markerLength: match[0].length,
   };
@@ -205,9 +206,6 @@ export function transformBlockquote(
   config: ResolvedConfig
 ): CalloutNode {
   const typeConfig = config.types[parsed.type];
-
-  // Default title: use the resolved config, or title-case the type key
-  const title = parsed.title || typeConfig?.defaultTitle || capitalize(parsed.type);
   const icon = typeConfig?.icon ?? STUB_DEFAULTS.icon;
 
   // Build oklch color CSS variables as inline data for the handler
@@ -218,63 +216,115 @@ export function transformBlockquote(
   // Collect the body children (everything after the first paragraph)
   const bodyChildren = blockquote.children.slice(1);
 
-  // Extract any inline body content from the first paragraph (after the marker).
+  // ── Extract inline content from the marker line ───────────────────────
   // The marker occupies `parsed.markerLength` characters at the start of the
-  // first text node. Anything remaining after stripping it is body text.
-  // Inline siblings (strong, em, link, code, ...) after the marker text are
-  // preserved as additional children of the inline paragraph — they were
-  // previously silently dropped (see audit BUG #1).
+  // first text node. Anything remaining on the SAME LINE as the marker
+  // becomes the RICH TITLE (issue #3). Content on subsequent lines (after a
+  // newline) is body content, NOT title.
+  //
+  // The marker regex's `(.*)` capture stops at `\n`, so `parsed.markerLength`
+  // only covers up to the end of the marker line. But remark-parse may split
+  // the marker line across multiple MDAST children (e.g., `[!NOTE] ` as text,
+  // `**bold**` as strong, `\nbody` as text). We walk the children and split
+  // them at the first newline: everything before is title, everything after
+  // is body.
+  const titleNodes: any[] = [];
+  const bodyInline: any[] = [];
+
+  // `parsed.title` is the plain-text portion of the title captured by the
+  // regex (everything after `]` and optional `+`/`-`, up to the first `\n`).
+  // `parsed.markerLength` includes this title text. We re-add it as a text
+  // node here, then walk the paragraph's children to find any additional
+  // inline content (strong, em, link, code) that belongs to the title.
+  if (parsed.title.length > 0) {
+    titleNodes.push({ type: 'text', value: parsed.title });
+  }
+
   const firstParagraph = blockquote.children[0];
   if (firstParagraph && firstParagraph.type === 'paragraph') {
-    const firstChild = firstParagraph.children[0];
-    if (firstChild && firstChild.type === 'text') {
-      const remaining = firstChild.value.slice(parsed.markerLength).trimStart();
-      const otherChildren = firstParagraph.children.slice(1);
-      if (remaining.length > 0 || otherChildren.length > 0) {
-        const newChildren: any[] = [];
-        if (remaining.length > 0) {
-          newChildren.push({ ...firstChild, value: remaining });
+    let firstTextSkipped = false;
+    let foundNewline = false;
+
+    for (const child of firstParagraph.children as any[]) {
+      if (child.type === 'text') {
+        // For the first text child, slice off `markerLength` chars (the
+        // marker + any title text the regex already captured). For
+        // subsequent text children, use the full value.
+        let text: string;
+        if (!firstTextSkipped) {
+          text = child.value.slice(parsed.markerLength);
+          firstTextSkipped = true;
+        } else {
+          text = child.value;
         }
-        newChildren.push(...otherChildren);
-        const inlineParagraph: Paragraph = {
-          type: 'paragraph',
-          children: newChildren,
-        };
-        bodyChildren.unshift(inlineParagraph as any);
-      }
-    } else if (firstChild) {
-      // First child isn't text (e.g., starts with bold) but the marker was
-      // somehow extracted from a later text node — preserve the paragraph
-      // minus the consumed text portion. This is rare but defensive.
-      const otherChildren = firstParagraph.children.slice(1);
-      if (otherChildren.length > 0) {
-        const inlineParagraph: Paragraph = {
-          type: 'paragraph',
-          children: otherChildren as any,
-        };
-        bodyChildren.unshift(inlineParagraph as any);
+
+        const nlIdx = text.indexOf('\n');
+        if (nlIdx === -1) {
+          // No newline in this text node
+          if (!foundNewline) {
+            // Before any newline → title (skip whitespace-only, since
+            // parsed.title already captured the meaningful text from the
+            // first text node)
+            const trimmed = text.trim();
+            if (trimmed.length > 0) {
+              titleNodes.push({ ...child, value: trimmed });
+            }
+          } else {
+            // After newline → body
+            const trimmed = text.replace(/^\s+/, '');
+            if (trimmed.length > 0) {
+              bodyInline.push({ ...child, value: trimmed });
+            }
+          }
+        } else {
+          // Newline found — split this text node
+          const before = text.slice(0, nlIdx);
+          const after = text.slice(nlIdx + 1);
+          // `before` is title (skip if whitespace-only — parsed.title
+          // already has the meaningful text from the first text node)
+          const beforeTrimmed = before.trim();
+          if (!foundNewline && beforeTrimmed.length > 0) {
+            titleNodes.push({ ...child, value: beforeTrimmed });
+          }
+          foundNewline = true;
+          // `after` is body
+          const afterTrimmed = after.replace(/^\s+/, '');
+          if (afterTrimmed.length > 0) {
+            bodyInline.push({ ...child, value: afterTrimmed });
+          }
+        }
+      } else {
+        // Non-text child (strong, em, link, code, ...)
+        if (!foundNewline) {
+          titleNodes.push(child);
+        } else {
+          bodyInline.push(child);
+        }
       }
     }
   }
+
+  // If we found body content in the first paragraph (after a newline),
+  // prepend it as an inline paragraph to the body children.
+  if (bodyInline.length > 0) {
+    bodyChildren.unshift({ type: 'paragraph', children: bodyInline } as any);
+  }
+
+  // Determine the plain-text fallback title (used when titleNodes is empty
+  // OR when showTitle renders the text fallback).
+  const fallbackTitle = parsed.title || typeConfig?.defaultTitle || capitalize(parsed.type);
 
   const node: CalloutNode = {
     type: 'callout',
     data: {
       calloutType: parsed.type,
-      calloutTitle: title,
+      calloutTitle: fallbackTitle,
+      calloutTitleNodes: titleNodes.length > 0 ? titleNodes : undefined,
       calloutIcon: icon,
       foldable: parsed.foldable,
       showTitle: config.showTitle,
       showIcon: config.showIcon,
       hName: parsed.foldable !== false ? 'details' : config.tag,
-      // Only `style` is read from hProperties by calloutToHast — the
-      // className / data-callout / data-callout-fold attributes are built
-      // directly in the handler (single source of truth, avoids the
-      // "properties set twice" anti-pattern that previously existed when
-      // state.applyData was called).
-      //
-      // hName IS still read by the handler (it computes tagName from it
-      // for non-foldable callouts), so we keep it above.
       hProperties: {
         style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
       },
