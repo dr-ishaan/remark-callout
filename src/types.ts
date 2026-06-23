@@ -90,6 +90,10 @@ export interface ResolvedConfig {
 
 /**
  * Custom MDAST node for a callout.
+ *
+ * The `accordionGroupId` field is only set for accordion panels (when
+ * `calloutType === 'accordion'`); it's assigned during the post-transform
+ * adjacency pass in `groupAdjacentAccordions`.
  */
 export interface CalloutNode extends Parent {
   type: 'callout';
@@ -106,6 +110,8 @@ export interface CalloutNode extends Parent {
     showIcon: boolean;
     hName: string;
     hProperties: Properties;
+    /** Group ID for exclusive expansion — only set for accordion panels */
+    accordionGroupId?: string;
   };
 }
 
@@ -123,5 +129,27 @@ export interface ParsedCallout {
   /** Foldable state */
   foldable: Foldable;
   /** Length of the full marker including title, for slicing the text node */
+  markerLength: number;
+}
+
+/**
+ * Parsed result from an accordion marker line (`[!!]` or `[! icon !]`).
+ *
+ * Accordions are a separate family from callouts:
+ *   - The marker is `[!!]` (bare) or `[! icon !]` (shorthand with icon).
+ *   - An optional icon can be an emoji or an inline SVG string.
+ *   - The remaining text after the optional icon token is the panel title.
+ *   - `+` / `-` after the marker controls open/closed state (default: closed).
+ *   - Adjacent accordion panels form a group with exclusive expansion via
+ *     native `<details name="...">`.
+ */
+export interface ParsedAccordion {
+  /** Custom icon (emoji string or inline SVG string), or '' if none */
+  icon: string;
+  /** Panel title (empty string if none) */
+  title: string;
+  /** Foldable state — accordions default to 'closed' */
+  foldable: 'open' | 'closed';
+  /** Length of the full marker (including icon spec + title) for slicing */
   markerLength: number;
 }

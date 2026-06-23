@@ -5,6 +5,7 @@ import type {
   CalloutTypeConfig,
   Foldable,
   ParsedCallout,
+  ParsedAccordion,
   ResolvedConfig,
 } from './types.js';
 import { BUILT_IN_CALLOUTS } from './defaults.js';
@@ -64,6 +65,96 @@ export function parseCalloutMarker(
     foldable,
     markerLength: match[0].length,
   };
+}
+
+// ─── Accordion Marker Parser ───────────────────────────────────────────────
+
+/**
+ * Regex to match the BARE accordion marker `[!!]` at the start of a text node.
+ *
+ * Accordions use a bare `[!!]` marker (no TYPE inside the brackets, unlike
+ * callouts which use `[!TYPE]`). An optional `+` / `-` after the closing
+ * bracket controls open/closed state (default: closed).
+ *
+ * The regex stops at `[!!]` and does NOT consume the `[!TYPE]` callout
+ * pattern, because callouts require `[A-Za-z]` after `[!`, whereas `[!!]`
+ * has `!` immediately after `[!`.
+ */
+const ACCORDION_RE = /^\[!!\]([\+\-])?[^\S\n]*(.*)/;
+
+/**
+ * Regex to match an accordion-WITH-ICON marker `[! icon !]`, OR extract an
+ * optional `[! icon !]` sub-token from the "rest" string captured by
+ * ACCORDION_RE.
+ *
+ * This regex serves DUAL purposes:
+ *   1. As a standalone accordion marker: `[! icon !] Title` (shorthand for
+ *      `[!!] [! icon !] Title`).
+ *   2. As a sub-token regex after `[!!]`: `[!!] [! icon !] Title` (legacy
+ *      long form, still supported for backward compatibility).
+ *
+ * Disambiguation from callouts: `[!TYPE]` (callout) requires `]` immediately
+ * after the type, with NO `!` before the `]`. This regex requires `!]` (with
+ * a `!` immediately before `]`). The two patterns are mutually exclusive.
+ */
+const ACCORDION_ICON_RE = /^\[!\s*([\s\S]+?)\s*!\]([\+\-])?[^\S\n]*(.*)/;
+
+/**
+ * Parse a text value for an accordion marker.
+ *
+ * Accepts TWO syntactic forms:
+ *   1. `[!!]`            — bare accordion (no icon). May be followed by an
+ *                          optional `[! icon !]` sub-token + title.
+ *   2. `[! icon !]`      — accordion WITH icon (shorthand). The icon appears
+ *                          between the two `!`s. May be followed by an
+ *                          optional `+`/`-` foldable char + title.
+ *
+ * Returns null if the text matches neither form. Callouts (`[!TYPE]`) do NOT
+ * match either form.
+ */
+export function parseAccordionMarker(
+  text: string,
+  enableFoldable: boolean
+): ParsedAccordion | null {
+  // Default foldable state for accordions is 'closed'.
+  // `+` forces open, `-` forces closed (same as default).
+  const resolveFoldable = (foldChar: string | undefined): 'open' | 'closed' =>
+    enableFoldable && foldChar === '+' ? 'open' : 'closed';
+
+  // Form 1: bare `[!!]` marker, optionally followed by `[! icon !]` + title.
+  const bareMatch = text.match(ACCORDION_RE);
+  if (bareMatch) {
+    const [, foldChar, rest] = bareMatch;
+
+    let icon = '';
+    let title = rest.trim();
+    const iconMatch = rest.match(ACCORDION_ICON_RE);
+    if (iconMatch) {
+      icon = iconMatch[1].trim();
+      title = (iconMatch[3] ?? '').trim();
+    }
+
+    return {
+      icon,
+      title,
+      foldable: resolveFoldable(foldChar),
+      markerLength: bareMatch[0].length,
+    };
+  }
+
+  // Form 2: shorthand `[! icon !]` marker (no `[!!]` prefix).
+  const iconMatch = text.match(ACCORDION_ICON_RE);
+  if (iconMatch) {
+    const [, iconRaw, foldChar, title] = iconMatch;
+    return {
+      icon: iconRaw.trim(),
+      title: (title ?? '').trim(),
+      foldable: resolveFoldable(foldChar),
+      markerLength: iconMatch[0].length,
+    };
+  }
+
+  return null;
 }
 
 // ─── Config Resolution ──────────────────────────────────────────────────────
@@ -191,6 +282,363 @@ function isCalloutBlockquote(
   return parseCalloutMarker(firstChild.value, enableFoldable);
 }
 
+// ─── Accordion Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Try to parse a paragraph as an accordion marker.
+ *
+ * Concatenates leading text+html children of the paragraph to handle inline
+ * SVG icons that remark-parse splits into multiple `html` MDAST nodes.
+ */
+function tryParseAccordionParagraph(
+  paragraph: Paragraph,
+  enableFoldable: boolean
+): ParsedAccordion | null {
+  const firstChild = paragraph.children[0];
+  if (!firstChild || firstChild.type !== 'text') return null;
+
+  // Quick check: text must start with `[!` for any accordion/callout marker.
+  if (!firstChild.value.startsWith('[!')) return null;
+
+  const fullText = extractLeadingInlineText(paragraph);
+  return parseAccordionMarker(fullText, enableFoldable);
+}
+
+/**
+ * Concatenate the `value` of all leading `text` and `html` children of a
+ * paragraph, stopping at the first non-text/non-html child.
+ *
+ * This reconstructs the full marker string when remark-parse splits inline
+ * HTML (like `<svg>`) into separate `html` MDAST nodes.
+ */
+function extractLeadingInlineText(paragraph: Paragraph): string {
+  let result = '';
+  for (const child of paragraph.children) {
+    if (child.type === 'text' || child.type === 'html') {
+      result += child.value;
+    } else {
+      break;
+    }
+  }
+  return result;
+}
+
+/**
+ * Extract the body inline content from a paragraph after stripping `markerLength`
+ * characters from the start.
+ *
+ * The marker may span multiple MDAST nodes (text + html) when the icon is an
+ * inline SVG. We walk the children, accumulating their text length, and:
+ *   - Skip nodes entirely within the marker
+ *   - Slice the node that straddles the marker/body boundary
+ *   - Keep all subsequent nodes unchanged
+ */
+function extractBodyInline(paragraph: Paragraph, markerLength: number): any[] {
+  const result: any[] = [];
+  let consumed = 0;
+
+  for (const child of paragraph.children) {
+    const childLen =
+      child.type === 'text' || child.type === 'html'
+        ? (child as any).value.length
+        : 0;
+
+    if (consumed >= markerLength) {
+      result.push(child);
+      continue;
+    }
+
+    if (consumed + childLen <= markerLength) {
+      consumed += childLen;
+      continue;
+    }
+
+    // This node straddles the marker/body boundary — slice it.
+    const sliceOffset = markerLength - consumed;
+    const childValue: string = (child as any).value;
+    const remaining = childValue.slice(sliceOffset).trimStart();
+    if (remaining.length > 0) {
+      result.push({ ...child, value: remaining });
+    }
+    consumed = markerLength;
+  }
+
+  return result;
+}
+
+// ─── Literary Transformer (Epigraph, Pullquote, Aside, Sidebar) ─────────────
+
+/**
+ * Literary type variants — render as non-callout-box HTML elements.
+ *   - epigraph, pullquote → <figure><blockquote/><figcaption/></figure>
+ *   - aside, sidebar      → <aside>[(<p class="{variant}-title"/>)? body...]</aside>
+ */
+type LiteraryVariant = 'epigraph' | 'pullquote' | 'aside' | 'sidebar';
+
+/**
+ * Check if a parsed callout type is a literary variant.
+ */
+function isLiteraryType(type: string): type is LiteraryVariant {
+  return (
+    type === 'epigraph' ||
+    type === 'pullquote' ||
+    type === 'pull' ||
+    type === 'aside' ||
+    type === 'sidebar'
+  );
+}
+
+/**
+ * Normalize literary type aliases:
+ *   [!PULL] → 'pullquote'
+ *   [!SIDEBAR] stays 'sidebar' (own variant, not alias of 'aside')
+ */
+function normalizeLiteraryVariant(type: string): LiteraryVariant {
+  if (type === 'epigraph') return 'epigraph';
+  if (type === 'aside') return 'aside';
+  if (type === 'sidebar') return 'sidebar';
+  return 'pullquote'; // covers 'pullquote' AND 'pull' alias
+}
+
+/**
+ * Transform a blockquote marked with a literary callout type into a callout
+ * node that will be rendered as a non-callout-box HTML element (<figure> or
+ * <aside>).
+ *
+ * The custom title from the marker line becomes the attribution for
+ * epigraph/pullquote, or the heading for aside/sidebar.
+ */
+function transformLiterary(
+  blockquote: Blockquote,
+  parsed: ParsedCallout,
+  variant: LiteraryVariant
+): CalloutNode {
+  // Collect body children (same extraction logic as regular callouts)
+  const bodyChildren = blockquote.children.slice(1);
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const titleNodes: any[] = [];
+    const bodyInline: any[] = [];
+
+    if (parsed.title.length > 0) {
+      titleNodes.push({ type: 'text', value: parsed.title });
+    }
+
+    let firstTextSkipped = false;
+    let foundNewline = false;
+
+    for (const child of firstParagraph.children as any[]) {
+      if (child.type === 'text') {
+        let text: string;
+        if (!firstTextSkipped) {
+          text = child.value.slice(parsed.markerLength);
+          firstTextSkipped = true;
+        } else {
+          text = child.value;
+        }
+
+        const nlIdx = text.indexOf('\n');
+        if (nlIdx === -1) {
+          if (!foundNewline) {
+            const trimmed = text.trim();
+            if (trimmed.length > 0) {
+              titleNodes.push({ ...child, value: trimmed });
+            }
+          } else {
+            const trimmed = text.replace(/^\s+/, '');
+            if (trimmed.length > 0) {
+              bodyInline.push({ ...child, value: trimmed });
+            }
+          }
+        } else {
+          const before = text.slice(0, nlIdx).trim();
+          const after = text.slice(nlIdx + 1);
+          if (!foundNewline && before.length > 0) {
+            titleNodes.push({ ...child, value: before });
+          }
+          foundNewline = true;
+          const afterTrimmed = after.replace(/^\s+/, '');
+          if (afterTrimmed.length > 0) {
+            bodyInline.push({ ...child, value: afterTrimmed });
+          }
+        }
+      } else {
+        if (!foundNewline) {
+          titleNodes.push(child);
+        } else {
+          bodyInline.push(child);
+        }
+      }
+    }
+
+    if (bodyInline.length > 0) {
+      bodyChildren.unshift({ type: 'paragraph', children: bodyInline } as any);
+    }
+  }
+
+  const title = parsed.title || '';
+  const hName = variant === 'aside' || variant === 'sidebar' ? 'aside' : 'figure';
+
+  const node: CalloutNode = {
+    type: 'callout',
+    data: {
+      calloutType: variant,
+      calloutTitle: title,
+      calloutIcon: '',
+      foldable: false,
+      showTitle: true,
+      showIcon: true,
+      hName,
+      hProperties: {},
+    },
+    children: bodyChildren,
+  };
+
+  return node;
+}
+
+// ─── Accordion Transformer ─────────────────────────────────────────────────
+
+/**
+ * Transform a blockquote marked with `[!!]` into an accordion panel node.
+ *
+ * The accordion node is stored as a `callout` MDAST node with
+ * `calloutType: 'accordion'` so the to-hast dispatch can route it to
+ * `renderAccordion()`.
+ */
+function transformAccordion(
+  blockquote: Blockquote,
+  parsed: ParsedAccordion
+): CalloutNode {
+  const bodyChildren = blockquote.children.slice(1);
+
+  // Extract any inline body content from the first paragraph (after the marker).
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const remainingInline = extractBodyInline(firstParagraph, parsed.markerLength);
+    if (remainingInline.length > 0) {
+      bodyChildren.unshift({ type: 'paragraph', children: remainingInline } as any);
+    }
+  }
+
+  const node: CalloutNode = {
+    type: 'callout',
+    data: {
+      calloutType: 'accordion',
+      calloutTitle: parsed.title,
+      calloutIcon: parsed.icon,
+      foldable: parsed.foldable,
+      showTitle: true,
+      showIcon: true,
+      accordionGroupId: '',  // assigned during adjacency pass
+      hName: 'details',
+      hProperties: {},
+    },
+    children: bodyChildren,
+  };
+
+  return node;
+}
+
+/**
+ * Transform a blockquote containing one or more accordion markers into an
+ * array of accordion panel nodes.
+ *
+ * A single blockquote may contain MULTIPLE accordion markers separated by
+ * blank `>` lines. This function scans every paragraph in the blockquote,
+ * finds each accordion marker, and splits the blockquote into one accordion
+ * node per marker paragraph.
+ *
+ * Returns null if the blockquote contains NO accordion markers.
+ */
+function transformAccordionBlockquote(
+  blockquote: Blockquote,
+  enableFoldable: boolean
+): CalloutNode[] | null {
+  const children = blockquote.children;
+  if (children.length === 0) return null;
+
+  const markerIndices: { idx: number; parsed: ParsedAccordion }[] = [];
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.type !== 'paragraph') continue;
+    const parsed = tryParseAccordionParagraph(child, enableFoldable);
+    if (parsed) {
+      markerIndices.push({ idx: i, parsed });
+    }
+  }
+
+  if (markerIndices.length === 0) return null;
+
+  const nodes: CalloutNode[] = [];
+  for (let s = 0; s < markerIndices.length; s++) {
+    const { idx: startIdx, parsed } = markerIndices[s];
+    const endIdx =
+      s + 1 < markerIndices.length
+        ? markerIndices[s + 1].idx
+        : children.length;
+
+    const sectionChildren = children.slice(startIdx, endIdx);
+    const syntheticBlockquote: Blockquote = {
+      type: 'blockquote',
+      children: sectionChildren as any,
+    };
+
+    nodes.push(transformAccordion(syntheticBlockquote, parsed));
+  }
+
+  return nodes;
+}
+
+// ─── Adjacency Grouping ────────────────────────────────────────────────────
+
+/**
+ * Post-transform pass: group adjacent accordion nodes by assigning each group
+ * a unique `name` attribute for native `<details>` exclusive expansion.
+ *
+ * Two accordion nodes are "adjacent" if they are siblings in the same parent
+ * AND there is no non-accordion node between them.
+ */
+function groupAdjacentAccordions(tree: Root): void {
+  let groupCounter = 0;
+
+  const stack: { children: any[] }[] = [tree as any];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    const children = current.children;
+    if (!Array.isArray(children)) continue;
+
+    for (const child of children) {
+      if (child && Array.isArray(child.children)) {
+        stack.push(child);
+      }
+    }
+
+    let runStart = -1;
+    for (let i = 0; i <= children.length; i++) {
+      const child = children[i];
+      const isAccordion =
+        child &&
+        child.type === 'callout' &&
+        child.data &&
+        child.data.calloutType === 'accordion';
+
+      if (isAccordion) {
+        if (runStart === -1) runStart = i;
+      } else {
+        if (runStart !== -1) {
+          groupCounter++;
+          const groupId = `accordion-group-${groupCounter}`;
+          for (let j = runStart; j < i; j++) {
+            children[j].data.accordionGroupId = groupId;
+          }
+          runStart = -1;
+        }
+      }
+    }
+  }
+}
+
 // ─── MDAST Transform ────────────────────────────────────────────────────────
 
 /**
@@ -207,6 +655,13 @@ export function transformBlockquote(
   parsed: ParsedCallout,
   config: ResolvedConfig
 ): CalloutNode {
+  // Special routing for literary types — render as <figure> or <aside>,
+  // not as a callout box. No icon, no colored title, no border, no foldable.
+  if (isLiteraryType(parsed.type)) {
+    const variant = normalizeLiteraryVariant(parsed.type);
+    return transformLiterary(blockquote, parsed, variant);
+  }
+
   const typeConfig = config.types[parsed.type];
   const icon = typeConfig?.icon ?? STUB_DEFAULTS.icon;
 
@@ -340,15 +795,13 @@ export function transformBlockquote(
 /**
  * Main remark plugin transformer.
  *
- * Visits all blockquotes, detects callout markers, and replaces them
+ * Visits all blockquotes, detects callout/accordion markers, and replaces them
  * with custom `callout` MDAST nodes.
  *
- * Handles nested callouts via a recursive descent: after a blockquote is
- * replaced with a `callout` node, we recurse into the new callout's children
- * to catch any inner blockquotes that should themselves be callouts. This
- * is single-pass with no nesting cap (the previous multi-pass + SKIP
- * approach was both wasteful and failed to descend into newly created
- * callout nodes).
+ * Accordions (`[!!]` and `[! icon !]`) are checked FIRST so that they are
+ * not mistaken for callouts. After the recursive descent completes, a final
+ * adjacency pass groups consecutive accordion nodes for exclusive
+ * `<details name="...">` behavior.
  */
 export function remarkCalloutTransformer(
   tree: Root,
@@ -357,7 +810,7 @@ export function remarkCalloutTransformer(
   const { enableFoldable } = config;
 
   // Recursive walker that descends into every parent's children and
-  // transforms callout blockquotes in place.
+  // transforms callout/accordion blockquotes in place.
   function walk(parent: { children: any[] }): void {
     const children = parent.children;
     for (let i = 0; i < children.length; i++) {
@@ -369,31 +822,32 @@ export function remarkCalloutTransformer(
         walk(node);
       }
 
-      // Now check if `node` itself is a callout blockquote.
+      // Now check if `node` itself is a blockquote that should be transformed.
       if (node && node.type === 'blockquote') {
+        // Check for accordion markers FIRST — `[!!]` and `[! icon !]` must
+        // not be mistaken for callouts.
+        const accordionNodes = transformAccordionBlockquote(node as Blockquote, enableFoldable);
+        if (accordionNodes && accordionNodes.length > 0) {
+          // Splice the (possibly multiple) accordion nodes in place of the
+          // original blockquote.
+          children.splice(i, 1, ...accordionNodes as any);
+          // Adjust index since we may have inserted multiple nodes
+          i += accordionNodes.length - 1;
+          continue;
+        }
+
+        // Fall through to callout detection.
         const parsed = isCalloutBlockquote(node as Blockquote, enableFoldable);
         if (parsed) {
           const calloutNode = transformBlockquote(node as Blockquote, parsed, config);
           children[i] = calloutNode;
-          // The new callout's children may themselves contain blockquotes
-          // that were inside the original blockquote (e.g., nested callouts).
-          // We already recursed into them above when they were children of
-          // the original blockquote — but `transformBlockquote` shallow-copies
-          // them into the new callout node, so the recursion already ran on
-          // the live reference. No need to re-walk.
-          //
-          // HOWEVER, the inner blockquote's transformation may have produced
-          // a `callout` node that is now a child of THIS new callout. That's
-          // correct — the inner callout is properly nested.
-          //
-          // Edge case: if the inner blockquote was NOT yet a callout (because
-          // its marker wasn't recognized on the first pass), it remains a
-          // blockquote. We do NOT re-walk here because we already visited
-          // its children above.
         }
       }
     }
   }
 
   walk(tree);
+
+  // Final pass: group adjacent accordion nodes for exclusive expansion.
+  groupAdjacentAccordions(tree);
 }
