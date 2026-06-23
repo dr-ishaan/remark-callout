@@ -21,8 +21,8 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
-import remarkCallout, { calloutToHast } from './dist/index.js';
-import { resolveConfig, parseCalloutMarker } from './dist/transform.js';
+import remarkCallout, { calloutToHast } from '../dist/index.js';
+import { resolveConfig, parseCalloutMarker } from '../dist/transform.js';
 
 let pass = 0, fail = 0;
 const results = [];

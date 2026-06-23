@@ -6,7 +6,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
-import remarkCallout, { calloutToHast, BUILT_IN_CALLOUTS, BUILT_IN_KEYS } from './dist/index.js';
+import remarkCallout, { calloutToHast, BUILT_IN_CALLOUTS, BUILT_IN_KEYS } from '../dist/index.js';
 
 const passed = [];
 const failed = [];

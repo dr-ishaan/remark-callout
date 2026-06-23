@@ -21,6 +21,12 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "test": "node tests/test-bugs.mjs && node tests/test-fixes.mjs && node tests/test-edge-probe.mjs",
+    "test:bugs": "node tests/test-bugs.mjs",
+    "test:fixes": "node tests/test-fixes.mjs",
+    "test:edge": "node tests/test-edge-probe.mjs",
+    "test:stress": "node tests/test-stress-2.mjs",
+    "test:stress:full": "node tests/test-stress-1.mjs && node tests/test-stress-2.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -59,6 +65,10 @@
   },
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/dr-ishaan/remark-callout.git"
+  },
+  "homepage": "https://github.com/dr-ishaan/remark-callout#readme",
+  "bugs": {
+    "url": "https://github.com/dr-ishaan/remark-callout/issues"
   }
 }

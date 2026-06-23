@@ -29,7 +29,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
-import remarkCallout, { calloutToHast, BUILT_IN_KEYS } from './dist/index.js';
+import remarkCallout, { calloutToHast, BUILT_IN_KEYS } from '../dist/index.js';
 
 const ITERATIONS = 10000;
 
@@ -278,7 +278,10 @@ if (failures.length > 0) {
 }
 
 import { writeFileSync } from 'node:fs';
-writeFileSync('/home/z/my-project/stress2-summary.json', JSON.stringify({
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+writeFileSync(join(__dirname, 'stress2-summary.json'), JSON.stringify({
   iterations: ITERATIONS,
   fragmentPoolSize: FRAGMENTS.length,
   assertions: totalTests,

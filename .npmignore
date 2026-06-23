@@ -1,0 +1,24 @@
+# Tests — not needed in the published npm package
+tests/
+
+# Build artifacts (already excluded by .gitignore, but be explicit)
+*.js.map
+*.d.ts.map
+
+# Dev files
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
