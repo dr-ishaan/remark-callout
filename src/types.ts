@@ -31,7 +31,7 @@ export interface CalloutTypeConfig {
 export interface CalloutOptions {
   /**
    * Custom callout type definitions.
-   * Keys are the type name (lowercase), matched against `[!KEY]`.
+   * Keys are matched case-insensitively against `[!KEY]` markers.
    * Values override the built-in defaults for that type, or define new types.
    */
   callouts?: Record<string, Partial<Omit<CalloutTypeConfig, 'defaultTitle'>> & { defaultTitle?: string }>;
@@ -57,18 +57,22 @@ export interface CalloutOptions {
    */
   disableBuiltins?: boolean;
   /**
-   * Tag name for the callout container.
+   * Tag name for the callout container (only used for non-foldable callouts;
+   * foldable callouts always use `<details>`).
    * @default 'div'
    */
   tag?: string;
   /**
-   * Custom icon mapping. Keys are type names, values are SVG strings.
-   * Overrides the built-in icon for that type.
+   * Custom icon mapping. Keys are type names (case-insensitive), values are
+   * SVG strings. Overrides the built-in icon for that type. If the key does
+   * not yet exist in `types` (e.g., when `disableBuiltins: true`), a stub
+   * type entry is auto-created so the override still takes effect.
    */
   icons?: Record<string, string>;
   /**
-   * Custom title mapping. Keys are type names, values are title strings.
-   * Overrides the built-in default title for that type.
+   * Custom title mapping. Keys are type names (case-insensitive), values are
+   * title strings. Overrides the built-in default title for that type. If
+   * the key does not yet exist in `types`, a stub type entry is auto-created.
    */
   titles?: Record<string, string>;
 }
@@ -94,6 +98,8 @@ export interface CalloutNode extends Parent {
     calloutTitle: string;
     calloutIcon: string;
     foldable: Foldable;
+    showTitle: boolean;
+    showIcon: boolean;
     hName: string;
     hProperties: Properties;
   };

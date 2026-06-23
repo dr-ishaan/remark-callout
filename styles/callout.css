@@ -62,6 +62,10 @@
   align-items: center;
   gap: var(--callout-header-gap);
   margin-bottom: var(--callout-header-margin-bottom);
+}
+
+/* Only foldable callouts need an unselectable header (it's the <summary>) */
+.callout-foldable > .callout-header {
   user-select: none;
 }
 
@@ -147,7 +151,10 @@
 
 /* ─── Empty Callout (no body) ──────────────────────────────────────────── */
 
-.callout:has(> .callout-body:empty) {
+/* Modern browsers (Chrome 105+, Safari 15.4+, Firefox 121+) */
+.callout:has(> .callout-body:empty),
+/* Fallback class — emitted by calloutToHast when body is empty */
+.callout.callout-empty {
   --callout-header-margin-bottom: 0;
 }
 
