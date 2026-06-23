@@ -274,9 +274,13 @@ export function calloutToHast(state: any, node: CalloutNode): Element {
     children: [header, body],
   };
 
-  // If foldable and open, add the `open` attribute to <details>
+  // If foldable and open, add the `open` attribute to <details>.
+  // Must be `true` (boolean), NOT `''` (empty string) — rehype-stringify
+  // drops boolean attributes whose value is an empty string, but keeps
+  // them when the value is `true`. Without this, <details> renders without
+  // `open` and appears collapsed despite `data-callout-fold="open"`.
   if (isFoldable && !isClosed) {
-    result.properties.open = '';
+    result.properties.open = true;
   }
 
   // Apply position info and any extra hProperties from the node

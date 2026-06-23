@@ -249,6 +249,32 @@ console.log('\n=== Bug 4: Foldable renders as <details> ===');
   );
 }
 
+// ─── Test: open=true boolean attribute on <details> ─────────────────────
+
+console.log('\n=== Bug 6: open attribute dropped by rehype-stringify ===');
+
+{
+  const html = await processMarkdown('> [!NOTE]+ Open by default\n> Body');
+  // The opening <details> tag must have an `open` attribute. Without
+  // it the callout appears collapsed despite data-callout-fold="open".
+  // rehype-stringify drops boolean attributes whose value is '', so we
+  // set open=true instead.
+  const openTag = html.match(/<details[^>]*>/)?.[0] ?? '';
+  assert(
+    /\bopen\b/.test(openTag),
+    'Open foldable <details> has the `open` attribute in its opening tag'
+  );
+}
+
+{
+  const html = await processMarkdown('> [!NOTE]- Closed by default\n> Body');
+  const openTag = html.match(/<details[^>]*>/)?.[0] ?? '';
+  assert(
+    !/\bopen\b/.test(openTag),
+    'Closed foldable <details> does NOT have the `open` attribute'
+  );
+}
+
 {
   const html = await processMarkdown('> [!NOTE] Not foldable');
   const rootTag = html.match(/^<(\w+)/)?.[1];
@@ -271,16 +297,20 @@ assert(
   '"terms" key exists (purple glossary cluster, not overwritten by amber)'
 );
 assert(
-  BUILT_IN_CALLOUTS['terms'].icon.includes('M12.586'),
-  '"terms" uses ICONS.tags (purple glossary icon)'
+  BUILT_IN_CALLOUTS['terms'].icon.includes('M8 6h13'),
+  '"terms" uses ICONS.list (purple glossary icon, updated)'
 );
 assert(
   BUILT_IN_CALLOUTS['legal-terms'] !== undefined,
   '"legal-terms" key exists as renamed amber duplicate'
 );
 assert(
-  BUILT_IN_CALLOUTS['legal-terms'].icon.includes('m16 16'),
-  '"legal-terms" uses ICONS.scale (amber legal icon)'
+  BUILT_IN_CALLOUTS['legal-terms'].icon.includes('M8 21h12'),
+  '"legal-terms" uses ICONS.scrollSeal (amber legal icon, dedup variant)'
+);
+assert(
+  BUILT_IN_CALLOUTS['legal-terms'].icon !== BUILT_IN_CALLOUTS['file'].icon,
+  '"legal-terms" has a distinct icon from "file" (uniqueness pass)'
 );
 
 // ─── Summary ───────────────────────────────────────────────────────────
