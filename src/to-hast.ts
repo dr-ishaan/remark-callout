@@ -310,10 +310,19 @@ export function calloutToHast(state: State, node: CalloutNode): Element {
 
   // ── Build header element ───────────────────────────────────────────────
 
+  // For foldable callouts, add `aria-expanded` to the <summary> so screen
+  // readers can announce open/closed state. Must be a string ("true"/"false"),
+  // NOT a boolean — rehype-stringify renders boolean true as a bare attribute
+  // (just `aria-expanded`) which is incorrect for this aria attribute.
+  const headerProperties: Properties = { className: ['callout-header'] };
+  if (isFoldable) {
+    headerProperties['aria-expanded'] = isClosed ? 'false' : 'true';
+  }
+
   const header: Element = {
     type: 'element',
     tagName: isFoldable ? 'summary' : 'div',
-    properties: { className: ['callout-header'] },
+    properties: headerProperties,
     children: headerChildren,
   };
 
@@ -350,6 +359,8 @@ export function calloutToHast(state: State, node: CalloutNode): Element {
     'data-callout': data.calloutType,
     ...(isFoldable ? { 'data-callout-fold': isClosed ? 'closed' : 'open' } : {}),
     ...(data.hProperties?.style ? { style: data.hProperties.style as string } : {}),
+    // Custom anchor ID from {#id} syntax — enables deep linking.
+    ...(data.calloutId ? { id: data.calloutId } : {}),
   };
 
   // If foldable and open, add the `open` attribute to <details>.
@@ -484,10 +495,15 @@ function renderLiterary(
     });
   }
 
+  const figureProperties: Properties = { className: [variant] };
+  if (data.calloutId) {
+    figureProperties.id = data.calloutId;
+  }
+
   const figure: Element = {
     type: 'element',
     tagName: 'figure',
-    properties: { className: [variant] },
+    properties: figureProperties,
     children: figureChildren,
   };
 
@@ -586,10 +602,15 @@ function renderAside(
     });
   }
 
+  const asideProperties: Properties = { className: [variant] };
+  if (data.calloutId) {
+    asideProperties.id = data.calloutId;
+  }
+
   const aside: Element = {
     type: 'element',
     tagName: 'aside',
-    properties: { className: [variant] },
+    properties: asideProperties,
     children: asideChildren,
   };
 
@@ -659,10 +680,15 @@ function renderAccordion(state: State, node: CalloutNode): Element {
     children: [],
   });
 
+  // Accordion summaries are always foldable — add `aria-expanded` for a11y.
+  // Must be a string ("true"/"false"), NOT a boolean — see callout header above.
   const summary: Element = {
     type: 'element',
     tagName: 'summary',
-    properties: { className: ['accordion-header'] },
+    properties: {
+      className: ['accordion-header'],
+      'aria-expanded': isOpen ? 'true' : 'false',
+    },
     children: summaryChildren,
   };
 
@@ -686,6 +712,11 @@ function renderAccordion(state: State, node: CalloutNode): Element {
   // `name` attribute enables native exclusive expansion
   if (groupId) {
     properties.name = groupId;
+  }
+
+  // Custom anchor ID from {#id} syntax
+  if (data.calloutId) {
+    properties.id = data.calloutId;
   }
 
   const result: Element = {

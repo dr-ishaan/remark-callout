@@ -22,21 +22,29 @@ import { BUILT_IN_CALLOUTS } from './defaults.js';
  *   [!TIP] Custom title here
  *   [!DANGER]- Watch out
  *   [!BEST-PRACTICE]+ Expandable
+ *   [!NOTE]{#my-id}                  ← custom anchor ID
+ *   [!NOTE]{#my-id}+ Custom title    ← ID + foldable + title
  *
  * Captures:
  *   1 → type key  (e.g., "NOTE", "WARNING", "BEST-PRACTICE") — letters,
  *       digits, and hyphens only. First char must be a letter. Underscores
  *       and leading digits are NOT allowed (issue #4) — use hyphens instead.
  *   2 → foldable  ("+" or "-" or undefined) — comes AFTER the closing bracket
- *   3 → title     (everything after optional foldable char, trimmed)
+ *       (and after the optional {#id})
+ *   3 → id        (anchor ID from {#id} syntax, or undefined)
+ *   4 → title     (everything after optional foldable char, trimmed)
  *
  * Note: `[^\S\n]*` is used instead of `\s*` so that newlines are NOT
  * consumed. If remark-parse merges blockquote lines into a single text
  * node like `[!NOTE]\nBody here`, the `\n` must remain so the body
  * text after it can be extracted by `transformBlockquote` rather than
  * being captured as the title.
+ *
+ * The optional `{#id}` block must appear immediately after `]` (before any
+ * foldable char). The ID must start with a letter and contain only letters,
+ * digits, hyphens, and underscores (valid HTML id characters).
  */
-const CALLOUT_RE = /^\[!([A-Za-z][A-Za-z0-9-]*)\]([\+\-])?[^\S\n]*(.*)/;
+const CALLOUT_RE = /^\[!([A-Za-z][A-Za-z0-9-]*)\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Parse a text value for a callout marker.
@@ -49,7 +57,7 @@ export function parseCalloutMarker(
   const match = text.match(CALLOUT_RE);
   if (!match) return null;
 
-  const [, rawType, foldChar, title] = match;
+  const [, rawType, id, foldChar, title] = match;
   const type = rawType.toLowerCase();
 
   let foldable: Foldable = false;
@@ -64,6 +72,7 @@ export function parseCalloutMarker(
     titleNodes: [],  // populated by transformBlockquote from MDAST inline children
     foldable,
     markerLength: match[0].length,
+    id: id || undefined,
   };
 }
 
@@ -73,14 +82,16 @@ export function parseCalloutMarker(
  * Regex to match the BARE accordion marker `[!!]` at the start of a text node.
  *
  * Accordions use a bare `[!!]` marker (no TYPE inside the brackets, unlike
- * callouts which use `[!TYPE]`). An optional `+` / `-` after the closing
- * bracket controls open/closed state (default: closed).
+ * callouts which use `[!TYPE]`). An optional `{#id}` block (anchor ID) and
+ * an optional `+` / `-` after the closing bracket control open/closed state
+ * (default: closed).
  *
- * The regex stops at `[!!]` and does NOT consume the `[!TYPE]` callout
- * pattern, because callouts require `[A-Za-z]` after `[!`, whereas `[!!]`
- * has `!` immediately after `[!`.
+ * Captures:
+ *   1 → id        (anchor ID from {#id} syntax, or undefined)
+ *   2 → foldChar  ("+" or "-" or undefined)
+ *   3 → rest      (everything after — may contain `[! icon !]` + title)
  */
-const ACCORDION_RE = /^\[!!\]([\+\-])?[^\S\n]*(.*)/;
+const ACCORDION_RE = /^\[!!\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Regex to match an accordion-WITH-ICON marker `[! icon !]`, OR extract an
@@ -93,11 +104,17 @@ const ACCORDION_RE = /^\[!!\]([\+\-])?[^\S\n]*(.*)/;
  *   2. As a sub-token regex after `[!!]`: `[!!] [! icon !] Title` (legacy
  *      long form, still supported for backward compatibility).
  *
+ * Captures:
+ *   1 → iconRaw    (raw icon content between `[!` and `!]`)
+ *   2 → id         (anchor ID from {#id} syntax, or undefined)
+ *   3 → foldChar   ("+" or "-" or undefined)
+ *   4 → title      (everything after optional foldable char)
+ *
  * Disambiguation from callouts: `[!TYPE]` (callout) requires `]` immediately
  * after the type, with NO `!` before the `]`. This regex requires `!]` (with
  * a `!` immediately before `]`). The two patterns are mutually exclusive.
  */
-const ACCORDION_ICON_RE = /^\[!\s*([\s\S]+?)\s*!\]([\+\-])?[^\S\n]*(.*)/;
+const ACCORDION_ICON_RE = /^\[!\s*([\s\S]+?)\s*!\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Parse a text value for an accordion marker.
@@ -108,6 +125,10 @@ const ACCORDION_ICON_RE = /^\[!\s*([\s\S]+?)\s*!\]([\+\-])?[^\S\n]*(.*)/;
  *   2. `[! icon !]`      — accordion WITH icon (shorthand). The icon appears
  *                          between the two `!`s. May be followed by an
  *                          optional `+`/`-` foldable char + title.
+ *
+ * Both forms support an optional `{#id}` block for anchor IDs:
+ *   [!!]{#my-id} Title
+ *   [! 💻 !]{#laptop} Title
  *
  * Returns null if the text matches neither form. Callouts (`[!TYPE]`) do NOT
  * match either form.
@@ -124,14 +145,14 @@ export function parseAccordionMarker(
   // Form 1: bare `[!!]` marker, optionally followed by `[! icon !]` + title.
   const bareMatch = text.match(ACCORDION_RE);
   if (bareMatch) {
-    const [, foldChar, rest] = bareMatch;
+    const [, id, foldChar, rest] = bareMatch;
 
     let icon = '';
     let title = rest.trim();
     const iconMatch = rest.match(ACCORDION_ICON_RE);
     if (iconMatch) {
       icon = iconMatch[1].trim();
-      title = (iconMatch[3] ?? '').trim();
+      title = (iconMatch[4] ?? '').trim();
     }
 
     return {
@@ -139,18 +160,20 @@ export function parseAccordionMarker(
       title,
       foldable: resolveFoldable(foldChar),
       markerLength: bareMatch[0].length,
+      id: id || undefined,
     };
   }
 
   // Form 2: shorthand `[! icon !]` marker (no `[!!]` prefix).
   const iconMatch = text.match(ACCORDION_ICON_RE);
   if (iconMatch) {
-    const [, iconRaw, foldChar, title] = iconMatch;
+    const [, iconRaw, id, foldChar, title] = iconMatch;
     return {
       icon: iconRaw.trim(),
       title: (title ?? '').trim(),
       foldable: resolveFoldable(foldChar),
       markerLength: iconMatch[0].length,
+      id: id || undefined,
     };
   }
 
@@ -187,6 +210,7 @@ export function resolveConfig(options: CalloutOptions = {}): ResolvedConfig {
     callouts = {},
     icons = {},
     titles = {},
+    types: typeWhitelist,
   } = options;
 
   // Start with built-in types (or empty if disabled). Lowercase keys.
@@ -243,16 +267,78 @@ export function resolveConfig(options: CalloutOptions = {}): ResolvedConfig {
     }
   }
 
+  // Build the allowedTypes whitelist (lowercase). When set (even if empty),
+  // only types in this list render as callouts; others fall through to plain
+  // blockquotes. An empty array means NO callout types are allowed (only
+  // literary types and accordions render). Literary types and accordions are
+  // always allowed regardless.
+  const LITERARY_TYPES = new Set(['epigraph', 'pullquote', 'pull', 'aside', 'sidebar']);
+  const allowedTypes = Array.isArray(typeWhitelist)
+    ? new Set(typeWhitelist.map(t => t.toLowerCase()))
+    : null;
+
   return {
     types,
     showTitle,
     showIcon,
     enableFoldable,
     tag,
+    allowedTypes,
   };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Find the closest matching callout type name using Levenshtein distance.
+ * Used by dev-mode warnings to suggest "Did you mean ...?" when an unknown
+ * type is encountered. Returns the closest match if its edit distance is ≤ 3,
+ * otherwise returns null.
+ */
+function findClosestType(input: string, candidates: string[]): string | null {
+  if (candidates.length === 0) return null;
+  let bestMatch: string | null = null;
+  let bestDistance = Infinity;
+  for (const candidate of candidates) {
+    const dist = levenshtein(input, candidate);
+    if (dist < bestDistance) {
+      bestDistance = dist;
+      bestMatch = candidate;
+    }
+  }
+  // Only suggest if the edit distance is reasonable (≤ 3) or the input is
+  // a prefix/substring of the candidate.
+  if (bestDistance <= 3) return bestMatch;
+  if (bestMatch && (bestMatch.startsWith(input) || bestMatch.includes(input))) {
+    return bestMatch;
+  }
+  return null;
+}
+
+/**
+ * Compute the Levenshtein edit distance between two strings.
+ * Used by findClosestType for "Did you mean ...?" suggestions.
+ */
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,        // deletion
+        dp[i][j - 1] + 1,        // insertion
+        dp[i - 1][j - 1] + cost  // substitution
+      );
+    }
+  }
+  return dp[m][n];
+}
 
 /**
  * Capitalize a type key for use as a fallback title.
@@ -490,6 +576,7 @@ function transformLiterary(
       showIcon: true,
       hName,
       hProperties: {},
+      calloutId: parsed.id,
     },
     children: bodyChildren,
   };
@@ -533,6 +620,7 @@ function transformAccordion(
       accordionGroupId: '',  // assigned during adjacency pass
       hName: 'details',
       hProperties: {},
+      calloutId: parsed.id,
     },
     children: bodyChildren,
   };
@@ -785,6 +873,7 @@ export function transformBlockquote(
       hProperties: {
         style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
       },
+      calloutId: parsed.id,
     },
     children: bodyChildren,
   };
@@ -807,7 +896,24 @@ export function remarkCalloutTransformer(
   tree: Root,
   config: ResolvedConfig
 ): void {
-  const { enableFoldable } = config;
+  const { enableFoldable, allowedTypes } = config;
+
+  // Literary types are always allowed regardless of the `types` whitelist.
+  const LITERARY_TYPES = new Set(['epigraph', 'pullquote', 'pull', 'aside', 'sidebar']);
+
+  // Dev-mode warning helper — only fires when NODE_ENV !== 'production'.
+  // Warns once per unknown type to avoid log spam.
+  const warnedTypes = new Set<string>();
+  const warnUnknownType = (type: string) => {
+    if (process.env.NODE_ENV === 'production') return;
+    if (warnedTypes.has(type)) return;
+    warnedTypes.add(type);
+    // Find closest match for a helpful suggestion
+    const allTypes = Object.keys(config.types);
+    const suggestion = findClosestType(type, allTypes);
+    const hint = suggestion ? ` Did you mean "${suggestion}"?` : '';
+    console.warn(`[remark-callout-plus] Unknown callout type "${type}".${hint} Falling back to plain blockquote.`);
+  };
 
   // Recursive walker that descends into every parent's children and
   // transforms callout/accordion blockquotes in place.
@@ -839,6 +945,25 @@ export function remarkCalloutTransformer(
         // Fall through to callout detection.
         const parsed = isCalloutBlockquote(node as Blockquote, enableFoldable);
         if (parsed) {
+          // Check the types whitelist (literary types are always allowed).
+          // If the type is not in the whitelist and not literary, fall through
+          // to a plain blockquote (don't transform).
+          if (allowedTypes && !allowedTypes.has(parsed.type) && !LITERARY_TYPES.has(parsed.type)) {
+            // Dev-mode warning for types that ARE known but not whitelisted:
+            // skip the warning (the user explicitly chose to exclude them).
+            // Warn only for truly unknown types (not in config.types at all).
+            if (!config.types[parsed.type]) {
+              warnUnknownType(parsed.type);
+            }
+            continue;  // leave as plain blockquote
+          }
+
+          // Warn for unknown types even when no whitelist is set (dev mode only).
+          if (!allowedTypes && !config.types[parsed.type] && !LITERARY_TYPES.has(parsed.type)) {
+            warnUnknownType(parsed.type);
+            // Still render as a callout (backward compat) — just warn.
+          }
+
           const calloutNode = transformBlockquote(node as Blockquote, parsed, config);
           children[i] = calloutNode;
         }

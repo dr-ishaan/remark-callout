@@ -75,6 +75,21 @@ export interface CalloutOptions {
    * the key does not yet exist in `types`, a stub type entry is auto-created.
    */
   titles?: Record<string, string>;
+  /**
+   * Whitelist of callout types that should render as callouts.
+   * Any type not in this list falls through to a plain blockquote.
+   * Literary types (epigraph, pullquote, pull, aside, sidebar) and
+   * accordions are NOT affected by this filter — they always render.
+   *
+   * When unset (default), all built-in + custom types render.
+   *
+   * @example
+   * // Only render note, warning, tip as callouts; everything else is a blockquote
+   * remarkCallout({ types: ['note', 'warning', 'tip'] })
+   *
+   * @default undefined (all types allowed)
+   */
+  types?: string[];
 }
 
 /**
@@ -86,6 +101,13 @@ export interface ResolvedConfig {
   showIcon: boolean;
   enableFoldable: boolean;
   tag: string;
+  /**
+   * Whitelist of callout types that render as callouts (lowercase).
+   * When null, all types are allowed. When set, types not in this list
+   * fall through to plain blockquotes. Literary types and accordions
+   * are always allowed regardless of this setting.
+   */
+  allowedTypes: Set<string> | null;
 }
 
 /**
@@ -112,6 +134,8 @@ export interface CalloutNode extends Parent {
     hProperties: Properties;
     /** Group ID for exclusive expansion — only set for accordion panels */
     accordionGroupId?: string;
+    /** Custom anchor ID from {#id} syntax — rendered as `id` attribute */
+    calloutId?: string;
   };
 }
 
@@ -130,6 +154,8 @@ export interface ParsedCallout {
   foldable: Foldable;
   /** Length of the full marker including title, for slicing the text node */
   markerLength: number;
+  /** Custom anchor ID extracted from {#id} syntax, or undefined if none */
+  id?: string;
 }
 
 /**
@@ -152,4 +178,6 @@ export interface ParsedAccordion {
   foldable: 'open' | 'closed';
   /** Length of the full marker (including icon spec + title) for slicing */
   markerLength: number;
+  /** Custom anchor ID extracted from {#id} syntax, or undefined if none */
+  id?: string;
 }
