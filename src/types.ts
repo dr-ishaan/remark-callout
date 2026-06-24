@@ -17,12 +17,12 @@ export interface CalloutTypeConfig {
   defaultTitle: string;
   /** Inline SVG string (stroke-based, 24x24 viewBox, uses currentColor) */
   icon: string;
-  /** oklch lightness component */
-  colorL: number;
-  /** oklch chroma component */
-  colorC: number;
-  /** oklch hue component */
-  colorH: number;
+  /** oklch lightness component (0–1) or a CSS var string like 'var(--brand-l)' */
+  colorL: number | string;
+  /** oklch chroma component (0–0.4) or a CSS var string like 'var(--brand-c)' */
+  colorC: number | string;
+  /** oklch hue component (0–360) or a CSS var string like 'var(--brand-h)' */
+  colorH: number | string;
 }
 
 /**

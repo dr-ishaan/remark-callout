@@ -19,14 +19,72 @@
  */
 
 import type { Plugin } from 'unified';
-import type { Root } from 'mdast';
-import type { CalloutOptions } from './types.js';
+import type { Root, Parent } from 'mdast';
+import type { CalloutOptions, CalloutNode, Foldable } from './types.js';
 import { resolveConfig, remarkCalloutTransformer } from './transform.js';
 import { calloutToHast } from './to-hast.js';
+import { BUILT_IN_CALLOUTS } from './defaults.js';
 
 export { calloutToHast } from './to-hast.js';
-export type { CalloutOptions, CalloutNode, CalloutTypeConfig, Foldable, ResolvedConfig } from './types.js';
+export type { CalloutOptions, CalloutNode, CalloutTypeConfig, Foldable, ParsedCallout, ParsedAccordion, ResolvedConfig } from './types.js';
 export { BUILT_IN_CALLOUTS, BUILT_IN_KEYS } from './defaults.js';
+
+/**
+ * Create a callout MDAST node programmatically, for injection into the tree
+ * from frontmatter, data files, or any non-markdown source.
+ *
+ * The returned node has the same shape as a marker-parsed callout and will
+ * be rendered identically by `calloutToHast`.
+ *
+ * @example
+ * ```ts
+ * import { createCalloutNode } from 'remark-callout-plus'
+ *
+ * const node = createCalloutNode('note', {
+ *   title: 'Generated from frontmatter',
+ *   children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Body text' }] }],
+ * })
+ *
+ * // Inject into the tree via a custom remark plugin
+ * const injectFromFrontmatter = () => (tree) => {
+ *   tree.children.unshift(node)
+ * }
+ * ```
+ */
+export function createCalloutNode(
+  type: string,
+  opts: {
+    title?: string;
+    icon?: string;
+    foldable?: Foldable;
+    id?: string;
+    children?: Parent['children'];
+  } = {}
+): CalloutNode {
+  const typeConfig = BUILT_IN_CALLOUTS[type.toLowerCase()];
+  const icon = opts.icon ?? typeConfig?.icon ?? BUILT_IN_CALLOUTS.note.icon;
+  const colorL = typeConfig?.colorL ?? 0.55;
+  const colorC = typeConfig?.colorC ?? 0.18;
+  const colorH = typeConfig?.colorH ?? 250;
+
+  return {
+    type: 'callout' as const,
+    data: {
+      calloutType: type.toLowerCase(),
+      calloutTitle: opts.title ?? typeConfig?.defaultTitle ?? type,
+      calloutIcon: icon,
+      foldable: opts.foldable ?? false,
+      showTitle: true,
+      showIcon: true,
+      hName: opts.foldable ? 'details' : 'div',
+      hProperties: {
+        style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
+      },
+      calloutId: opts.id,
+    },
+    children: opts.children ?? [],
+  };
+}
 
 /**
  * Remark plugin to transform callout blockquotes into styled containers.
