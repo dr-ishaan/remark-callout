@@ -112,6 +112,10 @@ const ICONS = {
   clock: svg(
     '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'
   ),
+  /** Calendar — event */
+  calendar: svg(
+    '<rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'
+  ),
   /** Megaphone — announcement */
   megaphone: svg(
     '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>'
@@ -222,6 +226,10 @@ const ICONS = {
   /** Arrow right circle — migration, upgrade, breaking-change, legacy-move */
   arrowRightCircle: svg(
     '<circle cx="12" cy="12" r="10"/><polyline points="12 16 16 12 12 8"/><line x1="8" y1="12" x2="16" y2="12"/>'
+  ),
+  /** Arrow right — next, continue, series navigation */
+  arrowRight: svg(
+    '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>'
   ),
   /** Wrench — troubleshooting, debug, triage, error-fix */
   wrench: svg(
@@ -1161,6 +1169,16 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
     icon: ICONS.gitFork,
     ...COLORS.blue,
   },
+  next: {
+    defaultTitle: 'Next in Series',
+    icon: ICONS.arrowRight,
+    ...COLORS.blue,
+  },
+  continue: {
+    defaultTitle: 'Continue Reading',
+    icon: ICONS.arrowRight,
+    ...COLORS.blue,
+  },
   uri: {
     defaultTitle: 'URI',
     icon: ICONS.link,
@@ -1510,6 +1528,20 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
     colorL: 0.5,
     colorC: 0,
     colorH: 0,
+  },
+
+  // ── Structured-data types (render with custom <dl> structure) ────────
+  // These render as callout boxes with a definition-list body for
+  // structured field data (biographical, event metadata, etc.).
+  bio: {
+    defaultTitle: 'Profile',
+    icon: ICONS.userCircle,
+    ...COLORS.purple,
+  },
+  event: {
+    defaultTitle: 'Event',
+    icon: ICONS.calendar,
+    ...COLORS.blue,
   },
 
   // ── experimental / ai-model ──────────────────────────────────────────

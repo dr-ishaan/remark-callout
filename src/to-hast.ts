@@ -233,13 +233,17 @@ export function calloutToHast(state: State, node: CalloutNode): Element {
   const data = node.data;
 
   // ── Route to specialized renderers for non-callout variants ───────────
-  // Literary types (epigraph, pullquote) → <figure><blockquote/><figcaption/></figure>
+  // Literary types (epigraph, pullquote) → <figure><div/><figcaption/></figure>
   if (data.calloutType === 'epigraph' || data.calloutType === 'pullquote') {
     return renderLiterary(state, node, data.calloutType as 'epigraph' | 'pullquote');
   }
   // Literary types (aside, sidebar) → <aside>[(<p class="{variant}-title"/>)? body...]</aside>
   if (data.calloutType === 'aside' || data.calloutType === 'sidebar') {
     return renderAside(state, node, data.calloutType as 'aside' | 'sidebar');
+  }
+  // Structured-data types (bio, event) → callout box with <dl> body
+  if (data.calloutType === 'bio' || data.calloutType === 'event') {
+    return renderStructured(state, node);
   }
   // Accordion panels ([!!] marker) → <details class="accordion" name="...">
   if (data.calloutType === 'accordion') {
@@ -478,7 +482,10 @@ function renderLiterary(
   const figureChildren: ElementContent[] = [
     {
       type: 'element',
-      tagName: 'blockquote',
+      // Use <div> instead of <blockquote> to avoid CSS conflicts with
+      // site-wide blockquote styles (borders, padding, etc.). The class
+      // name `{variant}-quote` still allows full styling control.
+      tagName: 'div',
       properties: { className: [`${variant}-quote`] },
       children: bodyChildren,
     },
@@ -730,6 +737,201 @@ function renderAccordion(state: State, node: CalloutNode): Element {
   if (isOpen) {
     properties.open = true;
   }
+
+  if (state.patch) state.patch(node as any, result);
+  return result;
+}
+
+// ─── Structured-Data Renderer (Bio, Event) ────────────────────────────────
+
+/**
+ * Parse "Key: Value" lines from the callout body into dt/dd pairs.
+ *
+ * Lines that don't match the "Key: Value" pattern are kept as regular
+ * paragraphs and rendered after the <dl>.
+ */
+function parseStructuredBody(children: any[]): { fields: { dt: string; dd: string }[]; extra: any[] } {
+  const fields: { dt: string; dd: string }[] = [];
+  const extra: any[] = [];
+
+  for (const child of children) {
+    if (child.type === 'paragraph' && child.children?.length > 0) {
+      // Concatenate all text in the paragraph
+      let text = '';
+      for (const c of child.children) {
+        if (c.type === 'text') text += c.value;
+      }
+
+      // remark-parse merges blockquote continuation lines into a single
+      // text node with \n separators. Split on \n and parse each line as
+      // a "Key: Value" field.
+      const lines = text.split('\n');
+      let allLinesAreFields = true;
+      const lineFields: { dt: string; dd: string }[] = [];
+
+      for (const line of lines) {
+        const match = line.match(/^\s*([^:\n]+):\s*(.+)\s*$/);
+        if (match) {
+          lineFields.push({ dt: match[1].trim(), dd: match[2].trim() });
+        } else {
+          // This line doesn't match — the paragraph has mixed content
+          allLinesAreFields = false;
+          break;
+        }
+      }
+
+      if (allLinesAreFields && lineFields.length > 0) {
+        fields.push(...lineFields);
+      } else {
+        extra.push(child);
+      }
+    } else {
+      extra.push(child);
+    }
+  }
+
+  return { fields, extra };
+}
+
+/**
+ * Render a structured-data callout (bio or event) as a standard callout box
+ * with a <dl> definition list for "Key: Value" fields.
+ *
+ * Example markdown:
+ *   > [!bio] Alan Turing
+ *   > Born: June 23, 1912
+ *   > Died: June 7, 1954
+ *   > Nationality: British
+ *   > Role: Mathematician
+ *
+ * Renders as:
+ *   <div class="callout callout-bio" ...>
+ *     <div class="callout-header">
+ *       <span class="callout-icon">...</span>
+ *       <span class="callout-title">Alan Turing</span>
+ *     </div>
+ *     <div class="callout-body">
+ *       <dl class="callout-fields">
+ *         <dt>Born</dt><dd>June 23, 1912</dd>
+ *         <dt>Died</dt><dd>June 7, 1954</dd>
+ *         ...
+ *       </dl>
+ *     </div>
+ *   </div>
+ */
+function renderStructured(state: State, node: CalloutNode): Element {
+  const data = node.data;
+  const typeConfig = node.data.calloutType;
+  const isFoldable = data.foldable !== false;
+  const isClosed = data.foldable === 'closed';
+  const tagName = isFoldable ? 'details' : (data.hName as string) || 'div';
+
+  // ── Build header children ──────────────────────────────────────────────
+  const headerChildren: ElementContent[] = [];
+
+  if (data.showIcon !== false && data.calloutIcon) {
+    const svgChildren = svgToHast(data.calloutIcon);
+    if (svgChildren.length > 0) {
+      headerChildren.push({
+        type: 'element',
+        tagName: 'span',
+        properties: { className: ['callout-icon'], 'aria-hidden': 'true' },
+        children: svgChildren,
+      });
+    }
+  }
+
+  if (data.showTitle !== false && data.calloutTitle) {
+    headerChildren.push({
+      type: 'element',
+      tagName: 'span',
+      properties: { className: ['callout-title'] },
+      children: [{ type: 'text', value: data.calloutTitle } as HastText],
+    });
+  }
+
+  const headerProperties: Properties = { className: ['callout-header'] };
+  if (isFoldable) {
+    headerProperties['aria-expanded'] = isClosed ? 'false' : 'true';
+  }
+
+  const header: Element = {
+    type: 'element',
+    tagName: isFoldable ? 'summary' : 'div',
+    properties: headerProperties,
+    children: headerChildren,
+  };
+
+  // ── Build body with <dl> for structured fields ─────────────────────────
+  const rawChildren = state.all ? (state.all(node as any) as ElementContent[]) : [];
+  const { fields, extra } = parseStructuredBody(node.children as any[]);
+
+  const bodyChildren: ElementContent[] = [];
+
+  // Render the <dl> if we have any fields
+  if (fields.length > 0) {
+    const dlChildren: ElementContent[] = [];
+    for (const field of fields) {
+      dlChildren.push({
+        type: 'element',
+        tagName: 'dt',
+        properties: {},
+        children: [{ type: 'text', value: field.dt } as HastText],
+      });
+      dlChildren.push({
+        type: 'element',
+        tagName: 'dd',
+        properties: {},
+        children: [{ type: 'text', value: field.dd } as HastText],
+      });
+    }
+    bodyChildren.push({
+      type: 'element',
+      tagName: 'dl',
+      properties: { className: ['callout-fields'] },
+      children: dlChildren,
+    });
+  }
+
+  // Append any non-field content (paragraphs that didn't match Key: Value)
+  for (const item of extra) {
+    if (state.all) {
+      const transformed = state.all({ type: 'root', children: [item] } as any) as ElementContent[];
+      bodyChildren.push(...transformed);
+    }
+  }
+
+  const body: Element = {
+    type: 'element',
+    tagName: 'div',
+    properties: { className: ['callout-body'] },
+    children: bodyChildren,
+  };
+
+  // ── Assemble root element ──────────────────────────────────────────────
+  const properties: Properties = {
+    className: [
+      'callout',
+      `callout-${data.calloutType}`,
+      ...(isFoldable ? ['callout-foldable'] : []),
+      ...(bodyChildren.length === 0 ? ['callout-empty'] : []),
+    ],
+    'data-callout': data.calloutType,
+    ...(isFoldable ? { 'data-callout-fold': isClosed ? 'closed' : 'open' } : {}),
+    ...(data.hProperties?.style ? { style: data.hProperties.style as string } : {}),
+    ...(data.calloutId ? { id: data.calloutId } : {}),
+  };
+
+  if (isFoldable && !isClosed) {
+    properties.open = true;
+  }
+
+  const result: Element = {
+    type: 'element',
+    tagName,
+    properties,
+    children: [header, body],
+  };
 
   if (state.patch) state.patch(node as any, result);
   return result;

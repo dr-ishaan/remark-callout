@@ -798,3 +798,27 @@
     box-shadow: inset 0 0 0 2px oklch(0.7 0.15 250);
   }
 }
+
+/* ─── Structured-Data Callouts (bio, event) ────────────────────────────────
+ * These callout types render "Key: Value" body lines as a <dl> definition
+ * list inside the standard callout box. */
+
+.callout-fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25em 1em;
+}
+
+.callout-fields dt {
+  font-weight: 600;
+  color: var(--callout-icon-color);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.callout-fields dd {
+  margin: 0;
+  font-size: 0.95em;
+}
