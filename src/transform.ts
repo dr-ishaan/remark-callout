@@ -40,11 +40,16 @@ import { BUILT_IN_CALLOUTS } from './defaults.js';
  * text after it can be extracted by `transformBlockquote` rather than
  * being captured as the title.
  *
- * The optional `{#id}` block must appear immediately after `]` (before any
- * foldable char). The ID must start with a letter and contain only letters,
- * digits, hyphens, and underscores (valid HTML id characters).
+ * The optional `{#id}` block may appear after `]`, optionally separated by
+ * whitespace (issue #7 fix — `[!NOTE] {#id}` now works as documented in the
+ * README). The ID must start with a letter and contain only letters, digits,
+ * hyphens, and underscores (valid HTML id characters).
  */
-const CALLOUT_RE = /^\[!([A-Za-z][A-Za-z0-9-]*)\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
+// Issue #4 + #7 fixes: allow optional whitespace inside the brackets
+// (`[! NOTE ]`) AND between `]` and `{#id}` (`[!NOTE] {#id}`).
+// `[^\S\n]*` matches whitespace except newlines (so we don't eat body content
+// when remark-parse merges blockquote lines into a single text node).
+const CALLOUT_RE = /^\[!\s*([A-Za-z][A-Za-z0-9-]*)\s*\][^\S\n]*(?:\{#([A-Za-z][\w-]*)\})?[^\S\n]*([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Parse a text value for a callout marker.
@@ -91,7 +96,8 @@ export function parseCalloutMarker(
  *   2 → foldChar  ("+" or "-" or undefined)
  *   3 → rest      (everything after — may contain `[! icon !]` + title)
  */
-const ACCORDION_RE = /^\[!!\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
+// Issue #7 fix: allow optional whitespace between `]` and `{#id}`.
+const ACCORDION_RE = /^\[!!\][^\S\n]*(?:\{#([A-Za-z][\w-]*)\})?[^\S\n]*([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Regex to match an accordion-WITH-ICON marker `[! icon !]`, OR extract an
@@ -114,7 +120,8 @@ const ACCORDION_RE = /^\[!!\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
  * after the type, with NO `!` before the `]`. This regex requires `!]` (with
  * a `!` immediately before `]`). The two patterns are mutually exclusive.
  */
-const ACCORDION_ICON_RE = /^\[!\s*([\s\S]+?)\s*!\](?:\{#([A-Za-z][\w-]*)\})?([\+\-])?[^\S\n]*(.*)/;
+// Issue #7 fix: allow optional whitespace between `]` and `{#id}`.
+const ACCORDION_ICON_RE = /^\[!\s*([\s\S]+?)\s*!\][^\S\n]*(?:\{#([A-Za-z][\w-]*)\})?[^\S\n]*([\+\-])?[^\S\n]*(.*)/;
 
 /**
  * Parse a text value for an accordion marker.
@@ -308,7 +315,9 @@ function findClosestType(input: string, candidates: string[]): string | null {
   }
   // Only suggest if the edit distance is reasonable (≤ 3) or the input is
   // a prefix/substring of the candidate.
-  if (bestDistance <= 3) return bestMatch;
+  // Issue #2 fix: threshold was ≤ 3, which missed common typos like
+  // "notexist" → "note" (distance 4). Broadened to ≤ 4.
+  if (bestDistance <= 4) return bestMatch;
   if (bestMatch && (bestMatch.startsWith(input) || bestMatch.includes(input))) {
     return bestMatch;
   }
@@ -452,6 +461,101 @@ function extractBodyInline(paragraph: Paragraph, markerLength: number): any[] {
   return result;
 }
 
+// ─── Title/Body Splitter (shared by transformBlockquote + transformLiterary) ─
+
+/**
+ * Walk a paragraph's inline children and split them at the FIRST newline:
+ * everything before → title nodes, everything after → body inline nodes.
+ *
+ * Issue #6 (GitHub #18) fix: the original inline-duplicated code in
+ * `transformBlockquote` and `transformLiterary` had a data-loss bug — when a
+ * text node contained a newline AND `foundNewline` was already true (from a
+ * previous text node), the `before` portion was silently dropped. This
+ * happened whenever the marker line had multiple text nodes with newlines
+ * (e.g., `[!bio] Title\n**Born:** value\n**Died:** value`), causing field
+ * values to vanish.
+ *
+ * This helper also preserves newlines in body text nodes (rather than
+ * stripping them) so downstream consumers like `parseStructuredBody` can
+ * split on `\n` to recover line structure.
+ *
+ * @param paragraph     The first paragraph of the blockquote (marker line).
+ * @param markerLength  Length of the marker (incl. captured title text) to
+ *                      slice off the first text child.
+ * @param initialTitle  Plain-text title captured by the regex (prepended to
+ *                      titleNodes if non-empty).
+ */
+function splitTitleAndBody(
+  paragraph: Paragraph,
+  markerLength: number,
+  initialTitle: string
+): { titleNodes: any[]; bodyInline: any[] } {
+  const titleNodes: any[] = [];
+  const bodyInline: any[] = [];
+
+  if (initialTitle.length > 0) {
+    titleNodes.push({ type: 'text', value: initialTitle });
+  }
+
+  let firstTextSkipped = false;
+  let foundNewline = false;
+
+  for (const child of paragraph.children as any[]) {
+    if (child.type === 'text') {
+      let text: string;
+      if (!firstTextSkipped) {
+        text = child.value.slice(markerLength);
+        firstTextSkipped = true;
+      } else {
+        text = child.value;
+      }
+
+      if (!foundNewline) {
+        // Still looking for the title/body boundary (the first `\n`).
+        const nlIdx = text.indexOf('\n');
+        if (nlIdx === -1) {
+          // No newline — entire text node is part of the title.
+          // Skip whitespace-only (parsed.title/initialTitle already has the
+          // meaningful text from the regex capture).
+          const trimmed = text.trim();
+          if (trimmed.length > 0) {
+            titleNodes.push({ ...child, value: trimmed });
+          }
+        } else {
+          // Newline found — split: before → title, after → body.
+          // PRESERVE the `after` portion verbatim (including any further
+          // newlines) so structured-data parsers can split on `\n` later.
+          const before = text.slice(0, nlIdx);
+          const after = text.slice(nlIdx + 1);
+          const beforeTrimmed = before.trim();
+          if (beforeTrimmed.length > 0) {
+            titleNodes.push({ ...child, value: beforeTrimmed });
+          }
+          foundNewline = true;
+          if (after.length > 0) {
+            bodyInline.push({ ...child, value: after });
+          }
+        }
+      } else {
+        // Already in body territory — preserve the entire text node,
+        // including any internal newlines, for downstream line-splitting.
+        if (text.length > 0) {
+          bodyInline.push({ ...child, value: text });
+        }
+      }
+    } else {
+      // Non-text child (strong, em, link, code, ...)
+      if (!foundNewline) {
+        titleNodes.push(child);
+      } else {
+        bodyInline.push(child);
+      }
+    }
+  }
+
+  return { titleNodes, bodyInline };
+}
+
 // ─── Literary Transformer (Epigraph, Pullquote, Aside, Sidebar) ─────────────
 
 /**
@@ -501,67 +605,27 @@ function transformLiterary(
 ): CalloutNode {
   // Collect body children (same extraction logic as regular callouts)
   const bodyChildren = blockquote.children.slice(1);
+  let titleNodes: any[] = [];
   const firstParagraph = blockquote.children[0];
   if (firstParagraph && firstParagraph.type === 'paragraph') {
-    const titleNodes: any[] = [];
-    const bodyInline: any[] = [];
-
-    if (parsed.title.length > 0) {
-      titleNodes.push({ type: 'text', value: parsed.title });
-    }
-
-    let firstTextSkipped = false;
-    let foundNewline = false;
-
-    for (const child of firstParagraph.children as any[]) {
-      if (child.type === 'text') {
-        let text: string;
-        if (!firstTextSkipped) {
-          text = child.value.slice(parsed.markerLength);
-          firstTextSkipped = true;
-        } else {
-          text = child.value;
-        }
-
-        const nlIdx = text.indexOf('\n');
-        if (nlIdx === -1) {
-          if (!foundNewline) {
-            const trimmed = text.trim();
-            if (trimmed.length > 0) {
-              titleNodes.push({ ...child, value: trimmed });
-            }
-          } else {
-            const trimmed = text.replace(/^\s+/, '');
-            if (trimmed.length > 0) {
-              bodyInline.push({ ...child, value: trimmed });
-            }
-          }
-        } else {
-          const before = text.slice(0, nlIdx).trim();
-          const after = text.slice(nlIdx + 1);
-          if (!foundNewline && before.length > 0) {
-            titleNodes.push({ ...child, value: before });
-          }
-          foundNewline = true;
-          const afterTrimmed = after.replace(/^\s+/, '');
-          if (afterTrimmed.length > 0) {
-            bodyInline.push({ ...child, value: afterTrimmed });
-          }
-        }
-      } else {
-        if (!foundNewline) {
-          titleNodes.push(child);
-        } else {
-          bodyInline.push(child);
-        }
-      }
-    }
-
-    if (bodyInline.length > 0) {
-      bodyChildren.unshift({ type: 'paragraph', children: bodyInline } as any);
+    const split = splitTitleAndBody(
+      firstParagraph,
+      parsed.markerLength,
+      parsed.title
+    );
+    titleNodes = split.titleNodes;
+    if (split.bodyInline.length > 0) {
+      bodyChildren.unshift({ type: 'paragraph', children: split.bodyInline } as any);
     }
   }
 
+  // Claim #2 fix: literary types must preserve inline markdown in titles.
+  // `parsed.title` is the plain-text portion captured by the regex (stops at
+  // the first inline markdown node). `titleNodes` contains the FULL title
+  // including inline-formatted children (strong, em, link, code). We pass
+  // both: `calloutTitle` as the plain-text fallback, `calloutTitleNodes`
+  // for rich rendering. If titleNodes is empty, the renderer falls back to
+  // calloutTitle.
   const title = parsed.title || '';
   const hName = variant === 'aside' || variant === 'sidebar' ? 'aside' : 'figure';
 
@@ -570,6 +634,7 @@ function transformLiterary(
     data: {
       calloutType: variant,
       calloutTitle: title,
+      calloutTitleNodes: titleNodes.length > 0 ? titleNodes : undefined,
       calloutIcon: '',
       foldable: false,
       showTitle: true,
@@ -767,86 +832,24 @@ export function transformBlockquote(
   // becomes the RICH TITLE (issue #3). Content on subsequent lines (after a
   // newline) is body content, NOT title.
   //
-  // The marker regex's `(.*)` capture stops at `\n`, so `parsed.markerLength`
-  // only covers up to the end of the marker line. But remark-parse may split
-  // the marker line across multiple MDAST children (e.g., `[!NOTE] ` as text,
-  // `**bold**` as strong, `\nbody` as text). We walk the children and split
-  // them at the first newline: everything before is title, everything after
-  // is body.
+  // Issue #6 fix: use the shared `splitTitleAndBody` helper, which correctly
+  // preserves text between multiple newlines (the old inline code dropped
+  // segments when `foundNewline` was already true, causing data loss in
+  // `[!bio]`/`[!event]` with inline-formatted labels).
+  const firstParagraph = blockquote.children[0];
   const titleNodes: any[] = [];
   const bodyInline: any[] = [];
 
-  // `parsed.title` is the plain-text portion of the title captured by the
-  // regex (everything after `]` and optional `+`/`-`, up to the first `\n`).
-  // `parsed.markerLength` includes this title text. We re-add it as a text
-  // node here, then walk the paragraph's children to find any additional
-  // inline content (strong, em, link, code) that belongs to the title.
-  if (parsed.title.length > 0) {
-    titleNodes.push({ type: 'text', value: parsed.title });
-  }
-
-  const firstParagraph = blockquote.children[0];
   if (firstParagraph && firstParagraph.type === 'paragraph') {
-    let firstTextSkipped = false;
-    let foundNewline = false;
-
-    for (const child of firstParagraph.children as any[]) {
-      if (child.type === 'text') {
-        // For the first text child, slice off `markerLength` chars (the
-        // marker + any title text the regex already captured). For
-        // subsequent text children, use the full value.
-        let text: string;
-        if (!firstTextSkipped) {
-          text = child.value.slice(parsed.markerLength);
-          firstTextSkipped = true;
-        } else {
-          text = child.value;
-        }
-
-        const nlIdx = text.indexOf('\n');
-        if (nlIdx === -1) {
-          // No newline in this text node
-          if (!foundNewline) {
-            // Before any newline → title (skip whitespace-only, since
-            // parsed.title already captured the meaningful text from the
-            // first text node)
-            const trimmed = text.trim();
-            if (trimmed.length > 0) {
-              titleNodes.push({ ...child, value: trimmed });
-            }
-          } else {
-            // After newline → body
-            const trimmed = text.replace(/^\s+/, '');
-            if (trimmed.length > 0) {
-              bodyInline.push({ ...child, value: trimmed });
-            }
-          }
-        } else {
-          // Newline found — split this text node
-          const before = text.slice(0, nlIdx);
-          const after = text.slice(nlIdx + 1);
-          // `before` is title (skip if whitespace-only — parsed.title
-          // already has the meaningful text from the first text node)
-          const beforeTrimmed = before.trim();
-          if (!foundNewline && beforeTrimmed.length > 0) {
-            titleNodes.push({ ...child, value: beforeTrimmed });
-          }
-          foundNewline = true;
-          // `after` is body
-          const afterTrimmed = after.replace(/^\s+/, '');
-          if (afterTrimmed.length > 0) {
-            bodyInline.push({ ...child, value: afterTrimmed });
-          }
-        }
-      } else {
-        // Non-text child (strong, em, link, code, ...)
-        if (!foundNewline) {
-          titleNodes.push(child);
-        } else {
-          bodyInline.push(child);
-        }
-      }
-    }
+    const split = splitTitleAndBody(
+      firstParagraph,
+      parsed.markerLength,
+      parsed.title
+    );
+    titleNodes.push(...split.titleNodes);
+    bodyInline.push(...split.bodyInline);
+  } else if (parsed.title.length > 0) {
+    titleNodes.push({ type: 'text', value: parsed.title });
   }
 
   // If we found body content in the first paragraph (after a newline),
@@ -904,15 +907,26 @@ export function remarkCalloutTransformer(
   // Dev-mode warning helper — only fires when NODE_ENV !== 'production'.
   // Warns once per unknown type to avoid log spam.
   const warnedTypes = new Set<string>();
-  const warnUnknownType = (type: string) => {
+  const findSuggestion = (type: string): string | null => {
+    const allTypes = Object.keys(config.types);
+    return findClosestType(type, allTypes);
+  };
+  // Issue #2 fix: the original warning said "Falling back to plain blockquote"
+  // but the code actually renders a styled callout with default colors/icon
+  // (backward compat). The message now accurately describes what happens.
+  // The "Did you mean ...?" suggestion also now uses a more lenient threshold
+  // (Levenshtein distance ≤ 4 OR prefix/substring match) so common typos like
+  // "notexist"→"note" still get a helpful hint.
+  const warnUnknownType = (type: string, willRender: boolean) => {
     if (process.env.NODE_ENV === 'production') return;
     if (warnedTypes.has(type)) return;
     warnedTypes.add(type);
-    // Find closest match for a helpful suggestion
-    const allTypes = Object.keys(config.types);
-    const suggestion = findClosestType(type, allTypes);
+    const suggestion = findSuggestion(type);
     const hint = suggestion ? ` Did you mean "${suggestion}"?` : '';
-    console.warn(`[remark-callout-plus] Unknown callout type "${type}".${hint} Falling back to plain blockquote.`);
+    const action = willRender
+      ? 'Rendering with default styling (note colors/icon).'
+      : 'Falling back to plain blockquote.';
+    console.warn(`[remark-callout-plus] Unknown callout type "${type}".${hint} ${action}`);
   };
 
   // Recursive walker that descends into every parent's children and
@@ -953,14 +967,14 @@ export function remarkCalloutTransformer(
             // skip the warning (the user explicitly chose to exclude them).
             // Warn only for truly unknown types (not in config.types at all).
             if (!config.types[parsed.type]) {
-              warnUnknownType(parsed.type);
+              warnUnknownType(parsed.type, /* willRender */ false);
             }
             continue;  // leave as plain blockquote
           }
 
           // Warn for unknown types even when no whitelist is set (dev mode only).
           if (!allowedTypes && !config.types[parsed.type] && !LITERARY_TYPES.has(parsed.type)) {
-            warnUnknownType(parsed.type);
+            warnUnknownType(parsed.type, /* willRender */ true);
             // Still render as a callout (backward compat) — just warn.
           }
 

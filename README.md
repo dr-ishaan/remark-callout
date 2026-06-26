@@ -77,6 +77,12 @@ Then add the CSS once in your global stylesheet:
 
 The Astro integration automatically wires up the remark plugin AND the `calloutToHast` handler — no manual `remarkRehype` configuration needed.
 
+> **CSS import portability:** The `@import` syntax above works in bundlers that honor the package's `exports` map (Tailwind CSS 4, Vite, Webpack 5+, esbuild). If your bundler doesn't resolve subpath exports, use the JS-side import instead, which works everywhere:
+> ```js
+> import 'remark-callout-plus/styles/callout.css'
+> ```
+> Both forms resolve to the same file (`styles/callout.css` is declared in the package's `exports` field).
+
 ## Syntax
 
 ### Callouts — `[!TYPE]`
@@ -322,6 +328,41 @@ const injectFromFrontmatter = () => (tree) => {
   tree.children.unshift(node)
 }
 ```
+
+### Rendering a programmatically-created callout
+
+**Important:** `createCalloutNode` returns an MDAST node, not an HTML string. To render it, you must inject it into a markdown tree (as shown above) and run the full unified pipeline. Do **not** pass the node directly to `processor.processSync()` — `processSync` expects a markdown string and will either throw `Cannot processSync without parser` or silently return an empty string.
+
+The correct pattern is to use `runSync` (MDAST → HAST) followed by `stringify` (HAST → HTML):
+
+```ts
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+import remarkCallout, { calloutToHast, createCalloutNode } from 'remark-callout-plus'
+import remarkRehype from 'remark-rehype'
+import rehypeStringify from 'rehype-stringify'
+
+const node = createCalloutNode('note', {
+  title: 'Programmatic',
+  children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Body text' }] }],
+})
+
+const tree = { type: 'root', children: [node] }
+
+const processor = unified()
+  .use(remarkParse)
+  .use(remarkCallout)
+  .use(remarkRehype, { handlers: { callout: calloutToHast } })
+  .use(rehypeStringify)
+
+// Two-step render: MDAST → HAST → HTML
+const hast = processor.runSync(tree)
+const html = processor.stringify(hast)
+console.log(html)
+// → <div class="callout callout-note" ...>...<p>Body text</p>...</div>
+```
+
+If you need to render the node alongside regular markdown, inject it into the tree via a custom remark plugin (as shown in the first example) and call `processSync(markdownString)` as usual — the injected node will be transformed alongside the parsed markdown.
 
 ## Output HTML
 

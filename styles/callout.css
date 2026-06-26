@@ -1,5 +1,5 @@
 /**
- * remark-callout — Default Stylesheet
+ * remark-callout-plus — Default Stylesheet
  *
  * Uses oklch color components set via inline style on each callout:
  *   --callout-l: lightness
@@ -9,7 +9,7 @@
  * Dark mode is automatic via `prefers-color-scheme: dark`.
  *
  * Import in your Astro layout / global CSS:
- *   @import 'remark-callout/styles/callout.css';
+ *   @import 'remark-callout-plus/styles/callout.css';
  *
  * Or copy and customize — every value is a CSS variable you can override.
  */

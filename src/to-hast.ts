@@ -432,16 +432,26 @@ function renderLiterary(
   variant: 'epigraph' | 'pullquote'
 ): Element {
   const data = node.data;
-  let attribution: string | undefined =
+
+  // Claim #2 fix: support rich (inline-markdown) attribution titles.
+  // `calloutTitleNodes` contains the full title with inline formatting
+  // (strong, em, link, code). `calloutTitle` is the plain-text fallback.
+  // When titleNodes are available, we transform them via state.all to
+  // produce HAST elements inside the figcaption.
+  let attributionText: string | undefined =
     data.calloutTitle && data.calloutTitle.length > 0
       ? data.calloutTitle
+      : undefined;
+  let attributionNodes: any[] | undefined =
+    data.calloutTitleNodes && data.calloutTitleNodes.length > 0
+      ? data.calloutTitleNodes
       : undefined;
 
   let bodyMdast = node.children ? [...node.children] : [];
 
   // If no explicit attribution, inspect the last paragraph for an em-dash
   // attribution line.
-  if (!attribution && bodyMdast.length > 0) {
+  if (!attributionText && !attributionNodes && bodyMdast.length > 0) {
     const last = bodyMdast[bodyMdast.length - 1];
     if (last && (last as any).type === 'paragraph') {
       const lastPara = last as { type: 'paragraph'; children: any[] };
@@ -462,7 +472,7 @@ function renderLiterary(
         }
 
         if (attrLineIdx >= 0) {
-          attribution = attrText;
+          attributionText = attrText;
           const bodyText = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
           if (bodyText.length > 0) {
             lastPara.children[0] = { ...firstChild, value: bodyText };
@@ -491,14 +501,29 @@ function renderLiterary(
     },
   ];
 
-  if (attribution) {
+  // Build figcaption children — rich nodes take priority over plain text.
+  if (attributionNodes || attributionText) {
+    let figcaptionChildren: ElementContent[];
+    if (attributionNodes && state.all) {
+      // Rich attribution: transform inline MDAST nodes via state.all.
+      const transformed = state.all(
+        { type: 'paragraph', children: attributionNodes } as any
+      ) as ElementContent[];
+      // Prepend the em-dash separator as a text node
+      figcaptionChildren = [
+        { type: 'text', value: '— ' } as HastText,
+        ...transformed,
+      ];
+    } else {
+      figcaptionChildren = [
+        { type: 'text', value: `— ${attributionText ?? ''}` } as HastText,
+      ];
+    }
     figureChildren.push({
       type: 'element',
       tagName: 'figcaption',
       properties: { className: [`${variant}-attribution`] },
-      children: [
-        { type: 'text', value: `— ${attribution}` } as HastText,
-      ],
+      children: figcaptionChildren,
     });
   }
 
@@ -535,14 +560,23 @@ function renderAside(
   variant: 'aside' | 'sidebar'
 ): Element {
   const data = node.data;
-  const heading: string | undefined =
+
+  // Claim #2 fix: support rich (inline-markdown) heading titles.
+  const headingText: string | undefined =
     data.calloutTitle && data.calloutTitle.length > 0
       ? data.calloutTitle
+      : undefined;
+  const headingNodes: any[] | undefined =
+    data.calloutTitleNodes && data.calloutTitleNodes.length > 0
+      ? data.calloutTitleNodes
       : undefined;
 
   let bodyMdast = node.children ? [...node.children] : [];
 
-  // Attribution detection (same as renderLiterary)
+  // Attribution detection (same as renderLiterary).
+  // Note: em-dash attribution is independent of the heading — a callout can
+  // have BOTH a heading (from the marker line) AND an em-dash attribution
+  // (from the last body line).
   let attribution: string | undefined;
   if (bodyMdast.length > 0) {
     const last = bodyMdast[bodyMdast.length - 1];
@@ -584,12 +618,21 @@ function renderAside(
 
   const asideChildren: ElementContent[] = [];
 
-  if (heading) {
+  // Render heading — rich nodes take priority over plain text.
+  if (headingNodes || headingText) {
+    let headingChildren: ElementContent[];
+    if (headingNodes && state.all) {
+      headingChildren = state.all(
+        { type: 'paragraph', children: headingNodes } as any
+      ) as ElementContent[];
+    } else {
+      headingChildren = [{ type: 'text', value: headingText ?? '' } as HastText];
+    }
     asideChildren.push({
       type: 'element',
       tagName: 'p',
       properties: { className: [`${variant}-title`] },
-      children: [{ type: 'text', value: heading } as HastText],
+      children: headingChildren,
     });
   }
 
@@ -744,37 +787,182 @@ function renderAccordion(state: State, node: CalloutNode): Element {
 
 // ─── Structured-Data Renderer (Bio, Event) ────────────────────────────────
 
+// ─── Structured-Data Helpers (Bio, Event) ──────────────────────────────────
+
 /**
- * Parse "Key: Value" lines from the callout body into dt/dd pairs.
+ * Recursively extract the plain-text content of an MDAST node (used to locate
+ * the colon position when splitting a line into label/value).
+ */
+function nodeToText(node: any): string {
+  if (node.type === 'text') return node.value;
+  if (node.children) return (node.children as any[]).map(nodeToText).join('');
+  return '';
+}
+
+/**
+ * Split a paragraph's inline children into "lines" by breaking on `\n`
+ * characters inside text nodes. Non-text nodes (strong, em, link, code) stay
+ * attached to whichever line they appear in.
+ *
+ * Issue #6 (GitHub #18) fix: the original `parseStructuredBody` only
+ * concatenated `text` children, ignoring `strong`/`em`/`link` nodes entirely.
+ * This caused lines like `**Born:** June 23, 1912` to lose both the label
+ * (inside `<strong>`) AND the value (the text after `</strong>`). This helper
+ * preserves ALL inline nodes and groups them by source line.
+ */
+function splitParagraphIntoLines(paragraph: any): any[][] {
+  const lines: any[][] = [[]];
+  for (const child of paragraph.children ?? []) {
+    if (child.type === 'text') {
+      const parts = child.value.split('\n');
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) lines.push([]); // start a new line
+        if (parts[i].length > 0) {
+          lines[lines.length - 1].push({ ...child, value: parts[i] });
+        }
+      }
+    } else {
+      lines[lines.length - 1].push(child);
+    }
+  }
+  // Drop trailing empty lines
+  while (lines.length > 0 && lines[lines.length - 1].length === 0) {
+    lines.pop();
+  }
+  return lines;
+}
+
+/**
+ * Given a line's inline nodes, find the first `:` in the concatenated text
+ * and split into label nodes (everything up to and including the colon) and
+ * value nodes (everything after).
+ *
+ * Returns `null` if the line has no colon (i.e., doesn't match `Key: Value`).
+ *
+ * Node-splitting strategy:
+ *  - Nodes entirely at or before the colon → label
+ *  - Nodes entirely after the colon → value
+ *  - A text node straddling the colon → split into two text nodes
+ *  - A non-text node (strong/em/link) straddling the colon → kept whole in
+ *    the label (the common case is `**Born:**` where the colon is the LAST
+ *    character of the strong node, which falls into the "at or before" branch)
+ */
+function splitLineOnColon(lineNodes: any[]): { label: any[]; value: any[] } | null {
+  // Build segment map: for each node, record its text start/end offsets in
+  // the concatenated line text.
+  let fullText = '';
+  const segments: { node: any; start: number; end: number; isText: boolean }[] = [];
+  for (const node of lineNodes) {
+    const text = nodeToText(node);
+    segments.push({
+      node,
+      start: fullText.length,
+      end: fullText.length + text.length,
+      isText: node.type === 'text',
+    });
+    fullText += text;
+  }
+
+  const colonIdx = fullText.indexOf(':');
+  if (colonIdx === -1) return null;
+
+  // Require at least one non-whitespace character before AND after the colon
+  // (so a line like ": foo" or "foo:" with empty value doesn't match).
+  const beforeColon = fullText.slice(0, colonIdx);
+  const afterColon = fullText.slice(colonIdx + 1);
+  if (!beforeColon.trim() || !afterColon.trim()) return null;
+
+  const label: any[] = [];
+  const value: any[] = [];
+
+  for (const seg of segments) {
+    if (seg.end <= colonIdx + 1) {
+      // Entirely at or before the colon (inclusive) → label
+      label.push(seg.node);
+    } else if (seg.start > colonIdx) {
+      // Entirely after the colon → value
+      value.push(seg.node);
+    } else if (seg.isText) {
+      // Text node straddles the colon — split it.
+      const offset = colonIdx - seg.start;
+      const before = seg.node.value.slice(0, offset + 1); // include the colon
+      const after = seg.node.value.slice(offset + 1);
+      if (before.trim().length > 0) label.push({ ...seg.node, value: before });
+      if (after.replace(/^\s+/, '').length > 0) {
+        value.push({ ...seg.node, value: after.replace(/^\s+/, '') });
+      }
+    } else {
+      // Non-text node straddles the colon. The common case (`**Born:**`)
+      // has the colon as the last char, which is handled by the first
+      // branch (seg.end === colonIdx + 1). If we reach here, the colon is
+      // genuinely in the middle of a formatted span — fall back to putting
+      // the whole node in the label (imperfect but safe; better than
+      // data loss).
+      label.push(seg.node);
+    }
+  }
+
+  // Trim trailing whitespace from the last label text node
+  for (let i = label.length - 1; i >= 0; i--) {
+    if (label[i].type === 'text') {
+      const trimmed = label[i].value.trimEnd();
+      if (trimmed.length === 0) {
+        label.splice(i, 1);
+      } else {
+        label[i] = { ...label[i], value: trimmed };
+      }
+      break;
+    }
+    break; // stop at first non-text node from the end
+  }
+
+  // Trim leading whitespace from the first value text node
+  for (let i = 0; i < value.length; i++) {
+    if (value[i].type === 'text') {
+      const trimmed = value[i].value.replace(/^\s+/, '');
+      if (trimmed.length === 0) {
+        value.splice(i, 1);
+        i--;
+      } else {
+        value[i] = { ...value[i], value: trimmed };
+      }
+      break;
+    }
+    break; // stop at first non-text node
+  }
+
+  return { label, value };
+}
+
+/**
+ * Parse "Key: Value" lines from the callout body into dt/dd node pairs.
+ *
+ * Issue #6 (GitHub #18) fix: now handles inline-formatted labels (e.g.,
+ * `**Born:** June 23, 1912`) by preserving the original MDAST nodes in the
+ * `dt`/`dd` arrays instead of flattening to plain strings. The renderer
+ * transforms these arrays via `state.all` so inline formatting (bold, italic,
+ * links, code) is preserved in the output `<dt>`/`<dd>` elements.
  *
  * Lines that don't match the "Key: Value" pattern are kept as regular
- * paragraphs and rendered after the <dl>.
+ * paragraphs and rendered after the `<dl>`.
  */
-function parseStructuredBody(children: any[]): { fields: { dt: string; dd: string }[]; extra: any[] } {
-  const fields: { dt: string; dd: string }[] = [];
+function parseStructuredBody(
+  children: any[]
+): { fields: { dt: any[]; dd: any[] }[]; extra: any[] } {
+  const fields: { dt: any[]; dd: any[] }[] = [];
   const extra: any[] = [];
 
   for (const child of children) {
     if (child.type === 'paragraph' && child.children?.length > 0) {
-      // Concatenate all text in the paragraph
-      let text = '';
-      for (const c of child.children) {
-        if (c.type === 'text') text += c.value;
-      }
-
-      // remark-parse merges blockquote continuation lines into a single
-      // text node with \n separators. Split on \n and parse each line as
-      // a "Key: Value" field.
-      const lines = text.split('\n');
+      const lines = splitParagraphIntoLines(child);
+      const lineFields: { dt: any[]; dd: any[] }[] = [];
       let allLinesAreFields = true;
-      const lineFields: { dt: string; dd: string }[] = [];
 
       for (const line of lines) {
-        const match = line.match(/^\s*([^:\n]+):\s*(.+)\s*$/);
-        if (match) {
-          lineFields.push({ dt: match[1].trim(), dd: match[2].trim() });
+        const split = splitLineOnColon(line);
+        if (split) {
+          lineFields.push({ dt: split.label, dd: split.value });
         } else {
-          // This line doesn't match — the paragraph has mixed content
           allLinesAreFields = false;
           break;
         }
@@ -797,6 +985,10 @@ function parseStructuredBody(children: any[]): { fields: { dt: string; dd: strin
  * Render a structured-data callout (bio or event) as a standard callout box
  * with a <dl> definition list for "Key: Value" fields.
  *
+ * Issue #6 fix: `<dt>` and `<dd>` now render their inline MDAST node arrays
+ * via `state.all`, preserving formatting like `**bold**` labels and `[links]`
+ * in values.
+ *
  * Example markdown:
  *   > [!bio] Alan Turing
  *   > Born: June 23, 1912
@@ -804,7 +996,12 @@ function parseStructuredBody(children: any[]): { fields: { dt: string; dd: strin
  *   > Nationality: British
  *   > Role: Mathematician
  *
- * Renders as:
+ * Example markdown (bold labels — now supported):
+ *   > [!bio] Alan Turing
+ *   > **Born:** June 23, 1912
+ *   > **Died:** June 7, 1954
+ *
+ * Both render as:
  *   <div class="callout callout-bio" ...>
  *     <div class="callout-header">
  *       <span class="callout-icon">...</span>
@@ -821,7 +1018,6 @@ function parseStructuredBody(children: any[]): { fields: { dt: string; dd: strin
  */
 function renderStructured(state: State, node: CalloutNode): Element {
   const data = node.data;
-  const typeConfig = node.data.calloutType;
   const isFoldable = data.foldable !== false;
   const isClosed = data.foldable === 'closed';
   const tagName = isFoldable ? 'details' : (data.hName as string) || 'div';
@@ -863,26 +1059,33 @@ function renderStructured(state: State, node: CalloutNode): Element {
   };
 
   // ── Build body with <dl> for structured fields ─────────────────────────
-  const rawChildren = state.all ? (state.all(node as any) as ElementContent[]) : [];
   const { fields, extra } = parseStructuredBody(node.children as any[]);
 
   const bodyChildren: ElementContent[] = [];
 
-  // Render the <dl> if we have any fields
+  // Render the <dl> if we have any fields.
+  // Issue #6 fix: transform dt/dd node arrays via state.all to preserve
+  // inline formatting (bold labels, links in values, etc.).
   if (fields.length > 0) {
     const dlChildren: ElementContent[] = [];
     for (const field of fields) {
+      const dtHast = state.all
+        ? (state.all({ type: 'paragraph', children: field.dt } as any) as ElementContent[])
+        : [];
       dlChildren.push({
         type: 'element',
         tagName: 'dt',
         properties: {},
-        children: [{ type: 'text', value: field.dt } as HastText],
+        children: dtHast,
       });
+      const ddHast = state.all
+        ? (state.all({ type: 'paragraph', children: field.dd } as any) as ElementContent[])
+        : [];
       dlChildren.push({
         type: 'element',
         tagName: 'dd',
         properties: {},
-        children: [{ type: 'text', value: field.dd } as HastText],
+        children: ddHast,
       });
     }
     bodyChildren.push({
