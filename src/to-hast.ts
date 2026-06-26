@@ -449,9 +449,17 @@ function renderLiterary(
 
   let bodyMdast = node.children ? [...node.children] : [];
 
-  // If no explicit attribution, inspect the last paragraph for an em-dash
-  // attribution line.
-  if (!attributionText && !attributionNodes && bodyMdast.length > 0) {
+  // ── Em-dash attribution detection ──────────────────────────────────
+  // Always scan the last paragraph for an em-dash attribution line and
+  // STRIP it from the body (so it doesn't appear in the quote). The em-dash
+  // text is used as the figcaption ONLY when no explicit title attribution
+  // was given on the marker line. When a title IS present, the title wins
+  // as the attribution and the em-dash line is simply removed from the body.
+  //
+  // This fixes the bug where `> [!EPIGRAPH] Title\n> Quote\n> — Author`
+  // glued the em-dash line into the quote body AND duplicated the
+  // attribution (once in the quote, once in the figcaption from the title).
+  if (bodyMdast.length > 0) {
     const last = bodyMdast[bodyMdast.length - 1];
     if (last && (last as any).type === 'paragraph') {
       const lastPara = last as { type: 'paragraph'; children: any[] };
@@ -472,12 +480,19 @@ function renderLiterary(
         }
 
         if (attrLineIdx >= 0) {
-          attributionText = attrText;
+          // Strip the em-dash line from the body (always — whether or not
+          // we use it as the attribution).
           const bodyText = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
           if (bodyText.length > 0) {
             lastPara.children[0] = { ...firstChild, value: bodyText };
           } else {
             bodyMdast = bodyMdast.slice(0, -1);
+          }
+
+          // Only use the em-dash text as the attribution when no title
+          // attribution was given on the marker line. Title takes priority.
+          if (!attributionText && !attributionNodes) {
+            attributionText = attrText;
           }
         }
       }
