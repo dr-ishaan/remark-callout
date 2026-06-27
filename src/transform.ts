@@ -297,7 +297,9 @@ export function resolveConfig(options: CalloutOptions = {}): ResolvedConfig {
     icon: options.icon,
     title: options.title,
     root: options.root,
-    useNativeHast: options.useNativeHast ?? false,
+    // v3.0: native HAST is now the default. Consumers who want the legacy
+    // handler-based path can set `useNativeHast: false` explicitly.
+    useNativeHast: options.useNativeHast ?? true,
   };
 }
 

@@ -160,23 +160,21 @@ export interface CalloutOptions {
   root?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
 
   /**
-   * When `true`, the plugin sets `hName`/`hProperties`/`hChildren` data on
-   * MDAST nodes instead of creating a custom `callout` node type. This
-   * eliminates the need to wire `calloutToHast` into `remark-rehype` —
-   * consumers can use `.use(remarkRehype)` with default config.
+   * When `true` (default in v3.0+), the plugin sets `hName`/`hProperties`/
+   * `hChildren` data on MDAST nodes instead of creating a custom `callout`
+   * node type. This eliminates the need to wire `calloutToHast` into
+   * `remark-rehype` — consumers can use `.use(remarkRehype)` with default config.
    *
-   * **Current limitation:** Only standard callouts (note/warning/tip/etc.)
-   * and foldable callouts support native HAST mode. Literary types
-   * (epigraph/pullquote/aside/sidebar), structured-data types (bio/event),
-   * and accordions still use the custom `callout` node type and require
-   * the `calloutToHast` handler.
+   * Supports ALL callout types: standard, foldable, literary
+   * (epigraph/pullquote/aside/sidebar), structured-data (bio/event), and
+   * accordions.
    *
-   * When `false` (default), all callout types create custom `callout` MDAST
-   * nodes and require `{ handlers: { callout: calloutToHast } }` in
-   * `remark-rehype`.
+   * Set to `false` to use the legacy handler-based path (requires wiring
+   * `{ handlers: { callout: calloutToHast } }` into `remark-rehype`).
+   * The legacy path is deprecated as of v3.0 and will be removed in v4.0.
    *
-   * @default false
-   * @since v1.3.0
+   * @default true (since v3.0; was false in v1.x–v2.x)
+   * @since v2.0.0
    */
   useNativeHast?: boolean;
 }

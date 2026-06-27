@@ -30,6 +30,29 @@ export type { CalloutOptions, CalloutNode, CalloutTypeConfig, Foldable, ParsedCa
 export { BUILT_IN_CALLOUTS, BUILT_IN_KEYS } from './defaults.js';
 
 /**
+ * @deprecated since v3.0 — use `useNativeHast: true` (now the default) instead.
+ *
+ * `calloutToHast` is the legacy HAST handler required in v1.x and v2.x when
+ * wiring the plugin into `remark-rehype`:
+ *
+ * ```ts
+ * // LEGACY (v1.x, v2.x) — still works but deprecated
+ * .use(remarkCallout, { useNativeHast: false })
+ * .use(remarkRehype, { handlers: { callout: calloutToHast } })
+ * ```
+ *
+ * In v3.0+, native HAST mode is the default and no handler is needed:
+ *
+ * ```ts
+ * // MODERN (v3.0+) — no handler required
+ * .use(remarkCallout)
+ * .use(remarkRehype)
+ * ```
+ *
+ * The `calloutToHast` export will be removed in v4.0.
+ */
+
+/**
  * Create a callout MDAST node programmatically, for injection into the tree
  * from frontmatter, data files, or any non-markdown source.
  *

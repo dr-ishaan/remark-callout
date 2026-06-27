@@ -36,7 +36,7 @@ npm install remark-callout-plus
 
 ### Standard setup (any unified pipeline)
 
-**v1.3.0+ — Native HAST mode (no handler required):**
+**v3.0+ — Native HAST is the default (no handler required):**
 
 ```ts
 import { unified } from 'unified'
@@ -50,17 +50,19 @@ import 'remark-callout-plus/styles/callout.css'
 
 const result = unified()
   .use(remarkParse)
-  .use(remarkCallout, { useNativeHast: true })  // ← no handler needed!
-  .use(remarkRehype)                             // ← standard config
+  .use(remarkCallout)           // ← native HAST is the default in v3.0+
+  .use(remarkRehype)            // ← standard config, no handler needed!
   .use(rehypeStringify)
   .processSync('> [!NOTE]\n> Hello world')
 
 console.log(String(result))
 ```
 
-> **v2.1.0+:** `useNativeHast: true` now supports **all callout types** — standard, foldable, literary (epigraph/pullquote/aside/sidebar), structured-data (bio/event), and accordions. No handler needed for any type.
+Works for **all callout types**: standard, foldable, literary (epigraph/pullquote/aside/sidebar), structured-data (bio/event), and accordions.
 
-**Handler-based setup (still works for backward compat, v1.0.0+):**
+> **v2.x users:** If you were using `useNativeHast: true`, you can now drop that option — it's the default. See the [v3.0 Migration Guide](#v30-migration-guide) below.
+
+**Legacy handler-based setup (deprecated in v3.0, removed in v4.0):**
 
 ```ts
 import { unified } from 'unified'
@@ -69,12 +71,11 @@ import remarkCallout, { calloutToHast } from 'remark-callout-plus'
 import remarkRehype from 'remark-rehype'
 import rehypeStringify from 'rehype-stringify'
 
-// Import the default stylesheet
 import 'remark-callout-plus/styles/callout.css'
 
 const result = unified()
   .use(remarkParse)
-  .use(remarkCallout)
+  .use(remarkCallout, { useNativeHast: false })  // ← opt out of native HAST
   .use(remarkRehype, { handlers: { callout: calloutToHast } })
   .use(rehypeStringify)
   .processSync('> [!NOTE]\n> Hello world')
@@ -82,7 +83,7 @@ const result = unified()
 console.log(String(result))
 ```
 
-> **Important:** When NOT using `useNativeHast: true`, you MUST pass `{ handlers: { callout: calloutToHast } }` to `remark-rehype`. Without it, callouts render as empty `<div>`s.
+> ⚠️ **Deprecated:** The `calloutToHast` handler export is deprecated since v3.0 and will be removed in v4.0. A one-time console warning fires when the handler is invoked in non-production environments. Migrate to native HAST (the default) by removing the handler import and the `remarkRehype` handlers option.
 
 ### Astro setup (one line)
 
@@ -312,9 +313,9 @@ remarkCallout({
   // ── v1.3.0+ new options ──────────────────────────────────────────
 
   // Native HAST mode — no calloutToHast handler required.
-  // v2.1.0+: supports ALL callout types (standard, foldable, literary,
-  // structured-data, accordion).
-  useNativeHast: false,       // default
+  // v3.0+: DEFAULT is true. Supports ALL callout types.
+  // Set to false only for the legacy handler path (deprecated, removed in v4.0).
+  useNativeHast: true,        // default since v3.0
 
   // Intercept unknown callout types (instead of console.warn).
   // Return a {type, ...} to remap, or undefined to drop to blockquote.
@@ -544,3 +545,89 @@ npm run dev      # Watch mode
 ## License
 
 [MIT](./LICENSE) © dr-ishaan
+
+---
+
+## v3.0 Migration Guide
+
+v3.0 makes **native HAST mode the default** and **deprecates the `calloutToHast` handler**. This is a breaking change in the sense that the default behavior changed, but existing code keeps working (the handler still functions, just with a deprecation warning).
+
+### What changed
+
+| | v1.x / v2.x | v3.0 |
+|---|---|---|
+| `useNativeHast` default | `false` | **`true`** |
+| `calloutToHast` handler | Required (with `{ handlers: { callout: calloutToHast } }`) | **Deprecated** (still works, warns once) |
+| Consumer setup | Handler wiring required | Just `.use(remarkRehype)` |
+
+### Migration paths
+
+#### Path A: You were using `useNativeHast: true` (v2.x)
+
+Drop the option — it's now the default:
+
+```diff
+  unified()
+    .use(remarkParse)
+-   .use(remarkCallout, { useNativeHast: true })
++   .use(remarkCallout)
+    .use(remarkRehype)
+    .use(rehypeStringify)
+```
+
+#### Path B: You were using the handler (v1.x or v2.x without `useNativeHast`)
+
+Remove the handler import and the `remarkRehype` handlers option:
+
+```diff
+- import remarkCallout, { calloutToHast } from 'remark-callout-plus'
++ import remarkCallout from 'remark-callout-plus'
+
+  unified()
+    .use(remarkParse)
+-   .use(remarkCallout)
+-   .use(remarkRehype, { handlers: { callout: calloutToHast } })
++   .use(remarkCallout)
++   .use(remarkRehype)
+    .use(rehypeStringify)
+```
+
+#### Path C: You want to keep the legacy handler (not recommended)
+
+Explicitly opt out of native HAST. The handler still works but fires a one-time deprecation warning:
+
+```ts
+import remarkCallout, { calloutToHast } from 'remark-callout-plus'
+
+unified()
+  .use(remarkParse)
+  .use(remarkCallout, { useNativeHast: false })  // ← explicit opt-out
+  .use(remarkRehype, { handlers: { callout: calloutToHast } })
+  .use(rehypeStringify)
+```
+
+> ⚠️ The legacy handler path will be **removed in v4.0**. Migrate to native HAST before then.
+
+### Deprecation warning
+
+If you continue using `calloutToHast` in v3.0, you'll see this console warning once (in non-production environments):
+
+```
+[remark-callout-plus] Deprecation: `calloutToHast` handler is deprecated since v3.0.
+Native HAST mode is now the default — remove `{ handlers: { callout: calloutToHast } }`
+from your remark-rehype config and drop the `calloutToHast` import.
+If you need the legacy path, set `useNativeHast: false` explicitly.
+The handler will be removed in v4.0.
+```
+
+### Astro integration
+
+The Astro integration (`remark-callout-plus/astro`) is unaffected — it already wires the handler internally. A future v3.1 will update it to use native HAST, but no consumer action is needed.
+
+### What stays the same
+
+- All callout syntax (`[!NOTE]`, `[!EPIGRAPH]`, `[!!]`, `[!bio]`, etc.) — unchanged
+- All options (`callouts`, `icons`, `titles`, `types`, `onUnknownCallout`, `icon`, `title`, `root`, etc.) — unchanged
+- All output HTML structure — unchanged (native HAST produces the same HTML as the handler)
+- CSS classes and custom properties — unchanged
+- `createCalloutNode` programmatic API — unchanged

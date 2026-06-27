@@ -229,7 +229,26 @@ function parseInnerSvg(inner: string): ElementContent[] {
  * `state` is the mdast-util-to-hast state object (has `.all()`, `.patch()`,
  * `.applyData()` methods).
  */
+// v3.0: one-time deprecation warning for the legacy calloutToHast handler.
+// Fires only in non-production environments.
+let calloutToHastDeprecationWarned = false;
+function warnCalloutToHastDeprecated(): void {
+  if (calloutToHastDeprecationWarned) return;
+  calloutToHastDeprecationWarned = true;
+  if (process.env.NODE_ENV === 'production') return;
+  console.warn(
+    '[remark-callout-plus] Deprecation: `calloutToHast` handler is deprecated since v3.0. ' +
+    'Native HAST mode is now the default — remove `{ handlers: { callout: calloutToHast } }` ' +
+    'from your remark-rehype config and drop the `calloutToHast` import. ' +
+    'If you need the legacy path, set `useNativeHast: false` explicitly. ' +
+    'The handler will be removed in v4.0.'
+  );
+}
+
 export function calloutToHast(state: State, node: CalloutNode): Element {
+  // v3.0: warn once that this handler is deprecated.
+  warnCalloutToHastDeprecated();
+
   const data = node.data;
 
   // ── Route to specialized renderers for non-callout variants ───────────

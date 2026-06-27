@@ -1,6 +1,6 @@
 {
   "name": "remark-callout-plus",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Remark plugin for GitHub/Obsidian-style callouts, literary types (epigraph/pullquote/aside/sidebar), and accordions with native exclusive expansion. Transforms [!TYPE] blockquotes into styled HTML containers with SVG icons, oklch colors, rich titles, and collapsible support.",
   "type": "module",
   "main": "./dist/index.js",
