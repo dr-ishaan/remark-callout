@@ -60,7 +60,7 @@ console.log('\n═══ FEATURE 2: Astro integration ═══');
     const integration = astroMod.default();
     ok('returns integration object with name', integration.name === 'remark-callout-plus');
     ok('has hooks', typeof integration.hooks === 'object');
-    ok('has config:setup hook', typeof integration.hooks['config:setup'] === 'function');
+    ok('has astro:config:setup hook', typeof integration.hooks['astro:config:setup'] === 'function');
   } catch (e) {
     ok('astro module imports', false, e.message);
   }

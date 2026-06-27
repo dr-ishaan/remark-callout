@@ -1,6 +1,6 @@
 {
   "name": "remark-callout-plus",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Remark plugin for GitHub/Obsidian-style callouts, literary types (epigraph/pullquote/aside/sidebar), and accordions with native exclusive expansion. Transforms [!TYPE] blockquotes into styled HTML containers with SVG icons, oklch colors, rich titles, and collapsible support.",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,6 +15,10 @@
       "types": "./dist/astro.d.ts",
       "import": "./dist/astro.js"
     },
+    "./satteri": {
+      "types": "./dist/satteri.d.ts",
+      "import": "./dist/satteri.js"
+    },
     "./styles/callout.css": "./styles/callout.css"
   },
   "files": [
@@ -25,6 +29,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "test": "node tests/test-7-features.mjs && node tests/test-new-features.mjs && node tests/test-expanded-edge-cases.mjs && node tests/test-satteri-adapter.mjs",
+    "test:unified": "node tests/test-7-features.mjs && node tests/test-new-features.mjs && node tests/test-expanded-edge-cases.mjs",
+    "test:satteri": "node tests/test-satteri-adapter.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -43,19 +50,29 @@
     "epigraph",
     "pullquote",
     "aside",
-    "sidebar"
+    "sidebar",
+    "satteri",
+    "astro"
   ],
   "author": "dr-ishaan",
   "license": "MIT",
   "peerDependencies": {
     "mdast-util-to-hast": "^13.0.0",
-    "unified": "^11.0.0"
+    "unified": "^11.0.0",
+    "satteri": "^0.9.0"
+  },
+  "peerDependenciesMeta": {
+    "mdast-util-to-hast": { "optional": true },
+    "unified": { "optional": true },
+    "satteri": { "optional": true }
   },
   "dependencies": {
     "hast-util-from-html": "^2.0.3",
     "unist-util-visit": "^5.0.0"
   },
   "devDependencies": {
+    "@astrojs/markdown-remark": "^7.2.0",
+    "@astrojs/markdown-satteri": "^0.3.2",
     "@types/hast": "^3.0.0",
     "@types/mdast": "^4.0.0",
     "@types/node": "^22.0.0",
@@ -64,6 +81,7 @@
     "rehype-stringify": "^10.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.0.0",
+    "satteri": "^0.9.3",
     "typescript": "^5.7.0",
     "unified": "^11.0.0"
   },

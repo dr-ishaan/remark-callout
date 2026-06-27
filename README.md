@@ -104,11 +104,59 @@ Then add the CSS once in your global stylesheet:
 
 The Astro integration automatically wires up the remark plugin AND the `calloutToHast` handler — no manual `remarkRehype` configuration needed.
 
+> **Astro 7 (Sätteri) auto-detect:** Since v3.2.0, the integration auto-detects whether the consumer is on Astro 7's new default Sätteri engine (`@astrojs/markdown-satteri`) or the legacy unified engine (`@astrojs/markdown-remark`), and wires the correct plugin path. The same `calloutPlus()` line works for both — see [Astro 7 (Sätteri) setup](#astro-7-sätteri-setup) below for details.
+
 > **CSS import portability:** The `@import` syntax above works in bundlers that honor the package's `exports` map (Tailwind CSS 4, Vite, Webpack 5+, esbuild). If your bundler doesn't resolve subpath exports, use the JS-side import instead, which works everywhere:
 > ```js
 > import 'remark-callout-plus/styles/callout.css'
 > ```
 > Both forms resolve to the same file (`styles/callout.css` is declared in the package's `exports` field).
+
+### Astro 7 (Sätteri) setup
+
+Astro 7 ships with a new Rust-based Markdown engine called **Sätteri** (`@astrojs/markdown-satteri`) as the default `markdown.processor`. Sätteri does not consume `remarkPlugins` or `remarkRehype.handlers` — it has its own TypeScript-level plugin API.
+
+Since v3.2.0, `remark-callout-plus` ships a Sätteri-native adapter at the `./satteri` subpath export. The Astro integration auto-detects Sätteri and wires the adapter for you — **the same one-line setup works on both engines**:
+
+```ts
+// astro.config.mjs — works on Astro 7 (Sätteri default) AND Astro 6 (unified)
+import { defineConfig } from 'astro/config'
+import calloutPlus from 'remark-callout-plus/astro'
+
+export default defineConfig({
+  integrations: [calloutPlus()],
+})
+```
+
+If you want to wire the Sätteri adapter manually (e.g., you've already customized `markdown.processor`), import from the `./satteri` subpath:
+
+```ts
+// astro.config.mjs
+import { defineConfig } from 'astro/config'
+import { satteri } from '@astrojs/markdown-satteri'
+import { calloutSatteri } from 'remark-callout-plus/satteri'
+
+export default defineConfig({
+  markdown: {
+    processor: satteri({
+      mdastPlugins: [calloutSatteri({
+        // same options as the remark plugin
+        callouts: { brand: { defaultTitle: 'Brand', icon: '...', colorL: 0.55, colorC: 0.18, colorH: 300 } },
+      })],
+    }),
+  },
+})
+```
+
+#### Engine compatibility matrix
+
+| Astro version | Default engine | Plugin path used by `calloutPlus()` |
+|---|---|---|
+| Astro 7+ | Sätteri (`@astrojs/markdown-satteri`) | Sätteri MDAST adapter (`./satteri`) |
+| Astro 7+ with `unified()` fallback | Unified (`@astrojs/markdown-remark`) | remark plugin + `calloutToHast` handler |
+| Astro 6 and earlier | Unified (`@astrojs/markdown-remark`) | remark plugin + `calloutToHast` handler |
+
+Both paths produce **identical HTML** — the Sätteri adapter reuses the same parsing and native-HAST transformation logic as the unified plugin. Feature parity is verified by the test suite (82 Sätteri-specific assertions run alongside the unified-pipeline tests).
 
 ## Syntax
 

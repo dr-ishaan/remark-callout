@@ -373,7 +373,7 @@ function capitalize(str: string): string {
 /**
  * Check if a blockquote starts with a callout marker.
  */
-function isCalloutBlockquote(
+export function isCalloutBlockquote(
   node: Blockquote,
   enableFoldable: boolean
 ): ParsedCallout | null {
@@ -394,7 +394,7 @@ function isCalloutBlockquote(
  * Concatenates leading text+html children of the paragraph to handle inline
  * SVG icons that remark-parse splits into multiple `html` MDAST nodes.
  */
-function tryParseAccordionParagraph(
+export function tryParseAccordionParagraph(
   paragraph: Paragraph,
   enableFoldable: boolean
 ): ParsedAccordion | null {
@@ -713,7 +713,7 @@ function transformAccordion(
  *
  * Returns null if the blockquote contains NO accordion markers.
  */
-function transformAccordionBlockquote(
+export function transformAccordionBlockquote(
   blockquote: Blockquote,
   enableFoldable: boolean,
   useNativeHast: boolean = false
