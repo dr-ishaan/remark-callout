@@ -713,8 +713,9 @@ function transformAccordion(
  */
 function transformAccordionBlockquote(
   blockquote: Blockquote,
-  enableFoldable: boolean
-): CalloutNode[] | null {
+  enableFoldable: boolean,
+  useNativeHast: boolean = false
+): Blockquote[] | null {
   const children = blockquote.children;
   if (children.length === 0) return null;
 
@@ -730,7 +731,7 @@ function transformAccordionBlockquote(
 
   if (markerIndices.length === 0) return null;
 
-  const nodes: CalloutNode[] = [];
+  const nodes: Blockquote[] = [];
   for (let s = 0; s < markerIndices.length; s++) {
     const { idx: startIdx, parsed } = markerIndices[s];
     const endIdx =
@@ -744,7 +745,12 @@ function transformAccordionBlockquote(
       children: sectionChildren as any,
     };
 
-    nodes.push(transformAccordion(syntheticBlockquote, parsed));
+    // v2.1.0: Native HAST mode for accordions
+    if (useNativeHast) {
+      nodes.push(transformAccordionNative(syntheticBlockquote, parsed));
+    } else {
+      nodes.push(transformAccordion(syntheticBlockquote, parsed) as any);
+    }
   }
 
   return nodes;
@@ -777,11 +783,21 @@ function groupAdjacentAccordions(tree: Root): void {
     let runStart = -1;
     for (let i = 0; i <= children.length; i++) {
       const child = children[i];
-      const isAccordion =
+      // Detect both handler-mode accordions (callout node with calloutType='accordion')
+      // and native HAST accordions (blockquote with hName='details' and data-accordion-native)
+      const isHandlerAccordion =
         child &&
         child.type === 'callout' &&
         child.data &&
         child.data.calloutType === 'accordion';
+      const isNativeAccordion =
+        child &&
+        child.type === 'blockquote' &&
+        child.data &&
+        child.data.hName === 'details' &&
+        child.data.hProperties &&
+        child.data.hProperties['data-accordion-native'] === 'true';
+      const isAccordion = isHandlerAccordion || isNativeAccordion;
 
       if (isAccordion) {
         if (runStart === -1) runStart = i;
@@ -790,7 +806,14 @@ function groupAdjacentAccordions(tree: Root): void {
           groupCounter++;
           const groupId = `accordion-group-${groupCounter}`;
           for (let j = runStart; j < i; j++) {
-            children[j].data.accordionGroupId = groupId;
+            // For handler accordions, set accordionGroupId on data
+            if (children[j].data.calloutType === 'accordion') {
+              children[j].data.accordionGroupId = groupId;
+            }
+            // For native accordions, set the name attribute on hProperties
+            if (children[j].data.hName === 'details') {
+              children[j].data.hProperties.name = groupId;
+            }
           }
           runStart = -1;
         }
@@ -981,6 +1004,687 @@ function transformBlockquoteNative(
 }
 
 /**
+ * Native HAST transformer for literary types (epigraph, pullquote).
+ *
+ * Renders as <figure class="{variant}"> containing:
+ *   <div class="{variant}-quote">{...children...}</div>
+ *   [<figcaption class="{variant}-attribution">— Author</figcaption>]
+ *
+ * Em-dash attribution detection reuses the shared `extractEmDashAttribution`
+ * logic (imported lazily via the to-hast module's approach — but since we
+ * can't import from to-hast without circular deps, we inline a minimal
+ * version here that operates on the callout's body children).
+ *
+ * @since v2.1.0
+ */
+function transformLiteraryNative(
+  blockquote: Blockquote,
+  parsed: ParsedCallout,
+  variant: 'epigraph' | 'pullquote'
+): Blockquote {
+  let bodyMdast = blockquote.children.slice(1);
+  const titleNodes: any[] = [];
+  const bodyInline: any[] = [];
+
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const split = splitTitleAndBody(firstParagraph, parsed.markerLength, parsed.title);
+    titleNodes.push(...split.titleNodes);
+    bodyInline.push(...split.bodyInline);
+  }
+  if (bodyInline.length > 0) {
+    bodyMdast.unshift({ type: 'paragraph', children: bodyInline } as any);
+  }
+
+  // Em-dash attribution detection — scan ALL children of last paragraph
+  let attributionText: string | undefined =
+    parsed.title && parsed.title.length > 0 ? parsed.title : undefined;
+  let attributionNodes: any[] | undefined =
+    titleNodes.length > 0 ? titleNodes : undefined;
+
+  {
+    const result = extractEmDashAttributionInline(bodyMdast);
+    bodyMdast = result.bodyMdast;
+    if (result.attribution && !attributionText && !attributionNodes) {
+      attributionText = result.attribution;
+    }
+  }
+
+  // Build figure children: the quote div + optional figcaption
+  const figureChildren: any[] = [];
+
+  // Quote div (wraps body content) — use blockquote with hName='div'
+  figureChildren.push({
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: { className: [`${variant}-quote`] },
+    },
+    children: bodyMdast,
+  });
+
+  // Figcaption (if attribution)
+  if (attributionNodes || attributionText) {
+    let figcaptionChildren: any[];
+    if (attributionNodes && attributionNodes.length > 0) {
+      figcaptionChildren = [{ type: 'text', value: '— ' }, ...attributionNodes];
+    } else {
+      figcaptionChildren = [{ type: 'text', value: `— ${attributionText ?? ''}` }];
+    }
+    figureChildren.push({
+      type: 'paragraph',
+      data: {
+        hName: 'figcaption',
+        hProperties: { className: [`${variant}-attribution`] },
+      },
+      children: figcaptionChildren,
+    });
+  }
+
+  const figureProperties: any = { className: [variant] };
+  if (parsed.id) figureProperties.id = parsed.id;
+
+  return {
+    type: 'blockquote',
+    data: {
+      hName: 'figure',
+      hProperties: figureProperties,
+    },
+    children: figureChildren,
+  } as Blockquote;
+}
+
+/**
+ * Native HAST transformer for aside/sidebar literary types.
+ *
+ * Renders as <aside class="{variant}"> containing:
+ *   [<p class="{variant}-title">Title</p>]
+ *   <div class="{variant}-body">{...children...}</div>
+ *   [<p class="{variant}-attribution">— Author</p>]
+ *
+ * @since v2.1.0
+ */
+function transformAsideNative(
+  blockquote: Blockquote,
+  parsed: ParsedCallout,
+  variant: 'aside' | 'sidebar'
+): Blockquote {
+  let bodyMdast = blockquote.children.slice(1);
+  const titleNodes: any[] = [];
+  const bodyInline: any[] = [];
+
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const split = splitTitleAndBody(firstParagraph, parsed.markerLength, parsed.title);
+    titleNodes.push(...split.titleNodes);
+    bodyInline.push(...split.bodyInline);
+  }
+  if (bodyInline.length > 0) {
+    bodyMdast.unshift({ type: 'paragraph', children: bodyInline } as any);
+  }
+
+  const headingText = parsed.title || undefined;
+  const headingNodes = titleNodes.length > 0 ? titleNodes : undefined;
+
+  // Em-dash attribution detection
+  let attribution: string | undefined;
+  {
+    const result = extractEmDashAttributionInline(bodyMdast);
+    bodyMdast = result.bodyMdast;
+    attribution = result.attribution;
+  }
+
+  const asideChildren: any[] = [];
+
+  // Heading paragraph (if title)
+  if (headingNodes || headingText) {
+    let headingChildren: any[];
+    if (headingNodes && headingNodes.length > 0) {
+      headingChildren = headingNodes;
+    } else {
+      headingChildren = [{ type: 'text', value: headingText ?? '' }];
+    }
+    asideChildren.push({
+      type: 'paragraph',
+      data: {
+        hName: 'p',
+        hProperties: { className: [`${variant}-title`] },
+      },
+      children: headingChildren,
+    });
+  }
+
+  // Body div
+  asideChildren.push({
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: { className: [`${variant}-body`] },
+    },
+    children: bodyMdast,
+  });
+
+  // Attribution paragraph
+  if (attribution) {
+    asideChildren.push({
+      type: 'paragraph',
+      data: {
+        hName: 'p',
+        hProperties: { className: [`${variant}-attribution`] },
+      },
+      children: [{ type: 'text', value: `— ${attribution}` }],
+    });
+  }
+
+  const asideProperties: any = { className: [variant] };
+  if (parsed.id) asideProperties.id = parsed.id;
+
+  return {
+    type: 'blockquote',
+    data: {
+      hName: 'aside',
+      hProperties: asideProperties,
+    },
+    children: asideChildren,
+  } as Blockquote;
+}
+
+/**
+ * Inline em-dash attribution extractor for the native HAST transformers.
+ *
+ * This is a minimal duplicate of `extractEmDashAttribution` from to-hast.ts,
+ * kept inline to avoid a circular import. It scans ALL children of the last
+ * paragraph in reverse, finds the last text node containing an em-dash line,
+ * and strips it from the body.
+ */
+function extractEmDashAttributionInline(
+  bodyMdast: any[]
+): { attribution: string | undefined; bodyMdast: any[] } {
+  if (bodyMdast.length === 0) return { attribution: undefined, bodyMdast };
+  const last = bodyMdast[bodyMdast.length - 1];
+  if (!last || last.type !== 'paragraph') return { attribution: undefined, bodyMdast };
+
+  const lastPara = last as { type: 'paragraph'; children: any[] };
+  const children = lastPara.children;
+
+  for (let childIdx = children.length - 1; childIdx >= 0; childIdx--) {
+    const child = children[childIdx];
+    if (!child || child.type !== 'text') continue;
+
+    const text = child.value.replace(/\r\n/g, '\n');
+    const lines = text.split('\n');
+
+    let attrLineIdx = -1;
+    let attrText = '';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const m = lines[i].match(/^\s*(?:--|—|–)\s*(.+)/);
+      if (m) {
+        attrLineIdx = i;
+        attrText = m[1].trim();
+        break;
+      }
+    }
+    if (attrLineIdx < 0) continue;
+
+    const beforeEmDash = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
+    let newBodyMdast = [...bodyMdast];
+
+    if (beforeEmDash.length > 0) {
+      const newChildren = children.slice(0, childIdx);
+      newChildren.push({ ...child, value: beforeEmDash });
+      const newPara = { ...lastPara, children: newChildren };
+      newBodyMdast[newBodyMdast.length - 1] = newPara;
+    } else {
+      const newChildren = children.slice(0, childIdx);
+      if (newChildren.length > 0) {
+        const newPara = { ...lastPara, children: newChildren };
+        newBodyMdast[newBodyMdast.length - 1] = newPara;
+      } else {
+        newBodyMdast = newBodyMdast.slice(0, -1);
+      }
+    }
+    return { attribution: attrText, bodyMdast: newBodyMdast };
+  }
+  return { attribution: undefined, bodyMdast };
+}
+
+/**
+ * Native HAST transformer for accordion panels.
+ *
+ * Renders as <details class="accordion" name="accordion-group-N" [open]>:
+ *   <summary class="accordion-header" aria-expanded="...">
+ *     [<span class="accordion-icon">{icon}</span>]
+ *     [<span class="accordion-title">{title}</span>]
+ *     <span class="accordion-chevron" aria-hidden="true"></span>
+ *   </summary>
+ *   <div class="accordion-body">{...children...}</div>
+ * </details>
+ *
+ * @since v2.1.0
+ */
+function transformAccordionNative(
+  blockquote: Blockquote,
+  parsed: ParsedAccordion
+): Blockquote {
+  const bodyChildren = blockquote.children.slice(1);
+
+  // Extract any inline body content from the first paragraph (after the marker)
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const remainingInline = extractBodyInline(firstParagraph, parsed.markerLength);
+    if (remainingInline.length > 0) {
+      bodyChildren.unshift({ type: 'paragraph', children: remainingInline } as any);
+    }
+  }
+
+  const isOpen = parsed.foldable === 'open';
+
+  // Build summary children
+  const summaryChildren: any[] = [];
+
+  // Optional icon
+  if (parsed.icon) {
+    let iconChildren: any[];
+    if (parsed.icon.startsWith('<svg')) {
+      iconChildren = svgToHastElements(parsed.icon);
+    } else {
+      iconChildren = [{ type: 'text', value: parsed.icon }];
+    }
+    if (iconChildren.length > 0) {
+      summaryChildren.push({
+        type: 'paragraph',
+        data: {
+          hName: 'span',
+          hProperties: {
+            className: ['accordion-icon'],
+            'aria-hidden': 'true',
+          },
+          hChildren: iconChildren,
+        },
+        children: [],
+      });
+    }
+  }
+
+  // Optional title
+  if (parsed.title) {
+    summaryChildren.push({
+      type: 'paragraph',
+      data: {
+        hName: 'span',
+        hProperties: { className: ['accordion-title'] },
+      },
+      children: [{ type: 'text', value: parsed.title }],
+    });
+  }
+
+  // Chevron (empty span)
+  summaryChildren.push({
+    type: 'paragraph',
+    data: {
+      hName: 'span',
+      hProperties: {
+        className: ['accordion-chevron'],
+        'aria-hidden': 'true',
+      },
+      hChildren: [],
+    },
+    children: [],
+  });
+
+  // Summary element
+  const summaryNode: Blockquote = {
+    type: 'blockquote',
+    data: {
+      hName: 'summary',
+      hProperties: {
+        className: ['accordion-header'],
+        'aria-expanded': isOpen ? 'true' : 'false',
+      },
+    },
+    children: summaryChildren as any,
+  };
+
+  // Body element
+  const bodyNode: Blockquote = {
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: { className: ['accordion-body'] },
+    },
+    children: bodyChildren as any,
+  };
+
+  // Root <details> properties
+  const rootProperties: any = { className: ['accordion'] };
+  // groupId is assigned during the adjacency pass — we use a placeholder
+  // data attribute that the adjacency pass will update. But since the
+  // adjacency pass operates on `callout` nodes, we need to use a different
+  // approach: store the group id on the node's data so the pass can find it.
+  // For native HAST, we'll use a data attribute and a marker.
+  // Actually, the adjacency pass sets `accordionGroupId` on callout nodes.
+  // For native HAST, we don't have callout nodes — so we need to handle
+  // adjacency differently. For now, we set a placeholder and rely on a
+  // post-processing pass that scans for native accordion blockquotes.
+  // Simplification: set name to '' and let a separate adjacency pass fix it.
+  // We'll mark native accordions with a data attribute so they can be found.
+  rootProperties['data-accordion-native'] = 'true';
+  if (parsed.id) rootProperties.id = parsed.id;
+  if (isOpen) rootProperties.open = true;
+
+  return {
+    type: 'blockquote',
+    data: {
+      hName: 'details',
+      hProperties: rootProperties,
+    },
+    children: [summaryNode, bodyNode],
+  } as Blockquote;
+}
+
+/**
+ * Native HAST transformer for structured-data types (bio, event).
+ *
+ * Renders as a standard callout box with a <dl> for "Key: Value" fields:
+ *   <div class="callout callout-{type}" ...>
+ *     <div class="callout-header">
+ *       <span class="callout-icon">{SVG}</span>
+ *       <span class="callout-title">{title}</span>
+ *     </div>
+ *     <div class="callout-body">
+ *       <dl class="callout-fields">
+ *         <dt>{label}</dt><dd>{value}</dd>
+ *         ...
+ *       </dl>
+ *     </div>
+ *   </div>
+ *
+ * @since v2.1.0
+ */
+function transformStructuredNative(
+  blockquote: Blockquote,
+  parsed: ParsedCallout,
+  config: ResolvedConfig
+): Blockquote {
+  const typeConfig = config.types[parsed.type];
+  const calloutCtx = { type: parsed.type, title: parsed.title, foldable: parsed.foldable };
+  const icon = config.icon
+    ? config.icon(calloutCtx)
+    : typeConfig?.icon ?? STUB_DEFAULTS.icon;
+  const fallbackTitle = config.title
+    ? config.title(calloutCtx)
+    : typeConfig?.defaultTitle ?? capitalize(parsed.type);
+
+  const colorL = typeConfig?.colorL ?? STUB_DEFAULTS.colorL;
+  const colorC = typeConfig?.colorC ?? STUB_DEFAULTS.colorC;
+  const colorH = typeConfig?.colorH ?? STUB_DEFAULTS.colorH;
+
+  const bodyChildrenRaw = blockquote.children.slice(1);
+  const titleNodes: any[] = [];
+  const bodyInline: any[] = [];
+
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const split = splitTitleAndBody(firstParagraph, parsed.markerLength, parsed.title);
+    titleNodes.push(...split.titleNodes);
+    bodyInline.push(...split.bodyInline);
+  }
+  if (bodyInline.length > 0) {
+    bodyChildrenRaw.unshift({ type: 'paragraph', children: bodyInline } as any);
+  }
+
+  const finalFallbackTitle = parsed.title || fallbackTitle;
+
+  // Build header children (icon + title)
+  const headerChildren: any[] = [];
+
+  if (config.showIcon !== false && icon) {
+    const svgElements = svgToHastElements(icon);
+    if (svgElements.length > 0) {
+      headerChildren.push({
+        type: 'paragraph',
+        data: {
+          hName: 'span',
+          hProperties: { className: ['callout-icon'], 'aria-hidden': 'true' },
+          hChildren: svgElements,
+        },
+        children: [],
+      });
+    }
+  }
+
+  if (config.showTitle !== false) {
+    let titleContent: any[];
+    if (titleNodes.length > 0) {
+      titleContent = titleNodes;
+    } else {
+      titleContent = [{ type: 'text', value: finalFallbackTitle }];
+    }
+    headerChildren.push({
+      type: 'paragraph',
+      data: {
+        hName: 'span',
+        hProperties: { className: ['callout-title'] },
+      },
+      children: titleContent,
+    });
+  }
+
+  const headerNode: Blockquote = {
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: { className: ['callout-header'] },
+    },
+    children: headerChildren as any,
+  };
+
+  // Parse structured fields from body
+  const { fields, extra } = parseStructuredBodyInline(bodyChildrenRaw);
+
+  const bodyChildren: any[] = [];
+
+  if (fields.length > 0) {
+    const dlChildren: any[] = [];
+    for (const field of fields) {
+      // <dt> with label nodes
+      dlChildren.push({
+        type: 'paragraph',
+        data: {
+          hName: 'dt',
+          hProperties: {},
+        },
+        children: field.dt,
+      });
+      // <dd> with value nodes
+      dlChildren.push({
+        type: 'paragraph',
+        data: {
+          hName: 'dd',
+          hProperties: {},
+        },
+        children: field.dd,
+      });
+    }
+    bodyChildren.push({
+      type: 'blockquote',
+      data: {
+        hName: 'dl',
+        hProperties: { className: ['callout-fields'] },
+      },
+      children: dlChildren,
+    });
+  }
+
+  // Append non-field content
+  for (const item of extra) {
+    bodyChildren.push(item);
+  }
+
+  const bodyNode: Blockquote = {
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: { className: ['callout-body'] },
+    },
+    children: bodyChildren as any,
+  };
+
+  const rootProperties: any = {
+    className: ['callout', `callout-${parsed.type}`],
+    'data-callout': parsed.type,
+    style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
+  };
+  if (parsed.id) rootProperties.id = parsed.id;
+
+  return {
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: rootProperties,
+    },
+    children: [headerNode, bodyNode],
+  } as Blockquote;
+}
+
+/**
+ * Inline structured-data body parser for the native HAST transformer.
+ *
+ * Duplicates the logic from to-hast.ts's `parseStructuredBody` +
+ * `splitParagraphIntoLines` + `splitLineOnColon` to avoid a circular import.
+ * Parses "Key: Value" lines into dt/dd node arrays, preserving inline
+ * formatting (bold labels, links in values, etc.).
+ */
+function parseStructuredBodyInline(
+  children: any[]
+): { fields: { dt: any[]; dd: any[] }[]; extra: any[] } {
+  const fields: { dt: any[]; dd: any[] }[] = [];
+  const extra: any[] = [];
+
+  for (const child of children) {
+    if (child.type === 'paragraph' && child.children?.length > 0) {
+      const lines = splitParagraphIntoLinesInline(child);
+      const lineFields: { dt: any[]; dd: any[] }[] = [];
+      let allLinesAreFields = true;
+
+      for (const line of lines) {
+        const split = splitLineOnColonInline(line);
+        if (split) {
+          lineFields.push({ dt: split.label, dd: split.value });
+        } else {
+          allLinesAreFields = false;
+          break;
+        }
+      }
+
+      if (allLinesAreFields && lineFields.length > 0) {
+        fields.push(...lineFields);
+      } else {
+        extra.push(child);
+      }
+    } else {
+      extra.push(child);
+    }
+  }
+
+  return { fields, extra };
+}
+
+function splitParagraphIntoLinesInline(paragraph: any): any[][] {
+  const lines: any[][] = [[]];
+  for (const child of paragraph.children ?? []) {
+    if (child.type === 'text') {
+      const parts = child.value.split('\n');
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) lines.push([]);
+        if (parts[i].length > 0) {
+          lines[lines.length - 1].push({ ...child, value: parts[i] });
+        }
+      }
+    } else {
+      lines[lines.length - 1].push(child);
+    }
+  }
+  while (lines.length > 0 && lines[lines.length - 1].length === 0) {
+    lines.pop();
+  }
+  return lines;
+}
+
+function splitLineOnColonInline(lineNodes: any[]): { label: any[]; value: any[] } | null {
+  let fullText = '';
+  const segments: { node: any; start: number; end: number; isText: boolean }[] = [];
+  for (const node of lineNodes) {
+    const text = nodeToTextInline(node);
+    segments.push({
+      node,
+      start: fullText.length,
+      end: fullText.length + text.length,
+      isText: node.type === 'text',
+    });
+    fullText += text;
+  }
+
+  const colonIdx = fullText.indexOf(':');
+  if (colonIdx === -1) return null;
+
+  const beforeColon = fullText.slice(0, colonIdx);
+  const afterColon = fullText.slice(colonIdx + 1);
+  if (!beforeColon.trim() || !afterColon.trim()) return null;
+
+  const label: any[] = [];
+  const value: any[] = [];
+
+  for (const seg of segments) {
+    if (seg.end <= colonIdx + 1) {
+      label.push(seg.node);
+    } else if (seg.start > colonIdx) {
+      value.push(seg.node);
+    } else if (seg.isText) {
+      const offset = colonIdx - seg.start;
+      const before = seg.node.value.slice(0, offset + 1);
+      const after = seg.node.value.slice(offset + 1);
+      if (before.trim().length > 0) label.push({ ...seg.node, value: before });
+      if (after.replace(/^\s+/, '').length > 0) {
+        value.push({ ...seg.node, value: after.replace(/^\s+/, '') });
+      }
+    } else {
+      label.push(seg.node);
+    }
+  }
+
+  // Trim trailing whitespace from last label text node
+  for (let i = label.length - 1; i >= 0; i--) {
+    if (label[i].type === 'text') {
+      const trimmed = label[i].value.trimEnd();
+      if (trimmed.length === 0) label.splice(i, 1);
+      else label[i] = { ...label[i], value: trimmed };
+      break;
+    }
+    break;
+  }
+
+  // Trim leading whitespace from first value text node
+  for (let i = 0; i < value.length; i++) {
+    if (value[i].type === 'text') {
+      const trimmed = value[i].value.replace(/^\s+/, '');
+      if (trimmed.length === 0) { value.splice(i, 1); i--; }
+      else value[i] = { ...value[i], value: trimmed };
+      break;
+    }
+    break;
+  }
+
+  return { label, value };
+}
+
+function nodeToTextInline(node: any): string {
+  if (node.type === 'text') return node.value;
+  if (node.children) return (node.children as any[]).map(nodeToTextInline).join('');
+  return '';
+}
+
+/**
  * Transform a blockquote into a callout node.
  *
  * The first paragraph is consumed as the marker line. Any inline content
@@ -998,12 +1702,24 @@ export function transformBlockquote(
   // not as a callout box. No icon, no colored title, no border, no foldable.
   if (isLiteraryType(parsed.type)) {
     const variant = normalizeLiteraryVariant(parsed.type);
+    // v2.1.0: Native HAST mode for literary types
+    if (config.useNativeHast) {
+      if (variant === 'epigraph' || variant === 'pullquote') {
+        return transformLiteraryNative(blockquote, parsed, variant) as any;
+      }
+      return transformAsideNative(blockquote, parsed, variant as 'aside' | 'sidebar') as any;
+    }
     return transformLiterary(blockquote, parsed, variant);
+  }
+
+  // v2.1.0: Native HAST mode for structured-data types (bio, event)
+  if (config.useNativeHast && (parsed.type === 'bio' || parsed.type === 'event')) {
+    return transformStructuredNative(blockquote, parsed, config) as any;
   }
 
   // v1.3.0: Native HAST mode for standard callouts (no handler required).
   // Literary types and structured-data types still use the handler path.
-  if (config.useNativeHast && parsed.type !== 'bio' && parsed.type !== 'event') {
+  if (config.useNativeHast) {
     return transformBlockquoteNative(blockquote, parsed, config) as any;
   }
 
@@ -1153,7 +1869,7 @@ export function remarkCalloutTransformer(
       if (node && node.type === 'blockquote') {
         // Check for accordion markers FIRST — `[!!]` and `[! icon !]` must
         // not be mistaken for callouts.
-        const accordionNodes = transformAccordionBlockquote(node as Blockquote, enableFoldable);
+        const accordionNodes = transformAccordionBlockquote(node as Blockquote, enableFoldable, config.useNativeHast);
         if (accordionNodes && accordionNodes.length > 0) {
           // Splice the (possibly multiple) accordion nodes in place of the
           // original blockquote.

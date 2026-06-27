@@ -58,9 +58,9 @@ const result = unified()
 console.log(String(result))
 ```
 
-> **Note:** `useNativeHast: true` currently supports standard callouts (note/warning/tip/etc.) and foldable callouts. Literary types (epigraph/pullquote/aside/sidebar), structured-data types (bio/event), and accordions still require the handler (see below).
+> **v2.1.0+:** `useNativeHast: true` now supports **all callout types** — standard, foldable, literary (epigraph/pullquote/aside/sidebar), structured-data (bio/event), and accordions. No handler needed for any type.
 
-**Handler-based setup (all callout types, v1.0.0+):**
+**Handler-based setup (still works for backward compat, v1.0.0+):**
 
 ```ts
 import { unified } from 'unified'
@@ -312,9 +312,9 @@ remarkCallout({
   // ── v1.3.0+ new options ──────────────────────────────────────────
 
   // Native HAST mode — no calloutToHast handler required.
-  // Currently supports standard + foldable callouts.
-  // Literary/structured-data/accordion still need the handler.
-  useNativeHast: false,       // default (true planned for v2.0)
+  // v2.1.0+: supports ALL callout types (standard, foldable, literary,
+  // structured-data, accordion).
+  useNativeHast: false,       // default
 
   // Intercept unknown callout types (instead of console.warn).
   // Return a {type, ...} to remap, or undefined to drop to blockquote.
