@@ -2,8 +2,9 @@
 
 [![npm version](https://img.shields.io/npm/v/remark-callout-plus.svg)](https://www.npmjs.com/package/remark-callout-plus)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests: 3.7M assertions](https://img.shields.io/badge/tests-3.7M%20assertions%20%2F%20100%25%20pass-brightgreen)](#stress-test)
 
-A [remark](https://github.com/remarkjs/remark) plugin for the unified pipeline that transforms GitHub/Obsidian-style callout blockquotes into styled HTML containers — with 210+ built-in callout types, literary types (epigraph/pullquote/aside/sidebar), a separate accordion family with native exclusive expansion, rich titles, structured-data types (bio/event), CSS variable integration, and an Astro integration wrapper.
+A [remark](https://github.com/remarkjs/remark) plugin for the unified pipeline that transforms GitHub/Obsidian-style callout blockquotes into styled HTML containers — with 210+ built-in callout types, literary types (epigraph/pullquote/aside/sidebar), a separate accordion family with native exclusive expansion, rich titles, structured-data types (bio/event), CSS variable integration, an Astro integration wrapper, and a **Sätteri-native adapter for Astro 7** (Rust-based Markdown engine).
 
 ## Features
 
@@ -18,13 +19,15 @@ A [remark](https://github.com/remarkjs/remark) plugin for the unified pipeline t
 - **Types whitelist** — restrict which types render as callouts
 - **Dev-mode warnings** — "Did you mean ...?" suggestions for unknown types
 - **Programmatic API** — `createCalloutNode()` for injecting callouts from frontmatter or code
-- **Astro integration** — one-line setup, auto-wires plugin + handler
+- **Astro integration** — one-line setup, auto-detects Sätteri (Astro 7 default) vs unified engine
+- **Sätteri adapter** — native Astro 7 Rust-engine support via the `./satteri` subpath export
 - **SVG icons** — Lucide-style, 24×24 viewBox, stroke-based, using `currentColor`
 - **oklch colors** — perceptually uniform, automatic dark mode
 - **Zero JavaScript** — all interactivity uses native HTML (`<details>`, `<summary>`)
 - **No `allowDangerousHtml` required** — SVG icons parsed into proper HAST elements
 - **Single-pass recursive transformer** — handles arbitrarily deep nesting with no cap
 - **CRLF-compatible** — Windows, old Mac, and Unix line endings all work
+- **Verified by 3.7M-assertion stress test** — 100% pass rate, full Sätteri ↔ unified feature parity
 
 ## Install
 
@@ -590,9 +593,130 @@ npm run build    # TypeScript → dist/
 npm run dev      # Watch mode
 ```
 
+### Tests
+
+```bash
+npm test                # Run all unit + adapter test suites
+npm run test:unified    # Run only the unified-pipeline tests
+npm run test:satteri    # Run only the Sätteri adapter tests
+node tests/stress-test-1m.mjs   # Run the 3.7M-assertion stress test (~3 min)
+```
+
+## Stress Test
+
+<a name="stress-test"></a>
+
+The plugin ships with a **3.7M-assertion stress test** (`tests/stress-test-1m.mjs`) that verifies full feature parity between the unified pipeline and the Sätteri adapter.
+
+### Matrix
+
+The stress test runs every callout family across a combinatorial matrix:
+
+| Dimension | Count | Values |
+|---|---|---|
+| Callout types | 217 | all built-in + literary types |
+| Foldable states | 3 | none, `+` (open), `-` (closed) |
+| Title variants | 5 | none, plain, bold, code, link |
+| Body variants | 4 | simple, multiline, code block, list |
+| ID variants | 2 | none, `{#id}` |
+| Nesting depth | 2 | flat, nested-1 |
+| Adjacency | 3 | single, pair, triple |
+| Engines | 2 | Sätteri adapter + Unified baseline |
+
+For each combination, the test renders the markdown through both engines and runs structural assertions (callout classes, data attributes, foldable semantics, aria-expanded, anchor IDs, title rendering, body preservation) plus a cross-engine parity check that normalizes HTML entities and whitespace.
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Wall-clock time | ~163 seconds |
+| Total runs | 305,760 |
+| Total assertions | 3,739,728 |
+| Passed | 3,739,728 |
+| Failed | 0 |
+| Pass rate | **100.000%** |
+| Runs/sec | ~1,880 |
+
+### Running the stress test
+
+```bash
+git clone https://github.com/dr-ishaan/remark-callout.git
+cd remark-callout
+npm install && npm run build
+node tests/stress-test-1m.mjs
+```
+
+The test streams progress to stderr and writes a JSON summary to stdout. To save both:
+
+```bash
+node tests/stress-test-1m.mjs > results.json 2> progress.log
+```
+
 ## License
 
 [MIT](./LICENSE) © dr-ishaan
+
+---
+
+## v3.2 Migration Guide (Sätteri adapter + Astro 7)
+
+v3.2.0 adds a Sätteri-native adapter and updates the Astro integration to auto-detect the active Markdown engine. This is **backward-compatible** — no consumer action is required for existing installs.
+
+### What changed
+
+| | v3.0 / v3.1 | v3.2.0+ |
+|---|---|---|
+| Astro 7 (Sätteri default) | ❌ Plugin silently no-ops (integration hook was wrong) | ✅ Auto-detects Sätteri, wires the native adapter |
+| Astro 7 (unified fallback) | ✅ Works | ✅ Works (unchanged) |
+| Astro 6 and earlier | ✅ Works | ✅ Works (unchanged) |
+| `calloutPlus()` integration | Worked only on Astro 6 | Works on Astro 6, 7+unified, AND 7+Sätteri |
+| `./satteri` subpath export | Did not exist | Available for manual Sätteri wiring |
+
+### Bug fixes in v3.2.0
+
+Two latent bugs in the existing Astro integration were fixed:
+
+1. **Hook name bug** (latent since v1.0): the integration registered `'config:setup'` but Astro calls the hook `'astro:config:setup'`. The hook never actually fired in real Astro builds. The existing test only checked that the integration *returned an object with a `config:setup` key*, not that the hook actually fired.
+
+2. **`mergeConfig` replacement bug**: Astro's `mergeConfig` has a special case for `markdown.processor` — when the new value has a `createRenderer` function, the entire processor is REPLACED (not merged). The naive `updateConfig({ markdown: { processor: {...} } })` approach lost the original `createRenderer` closure. Fixed by mutating `config.markdown.processor.options.mdastPlugins` in place — the `createRenderer` closure reads this array at render time.
+
+### Migration paths
+
+#### Path A: You're on Astro 6 (or Astro 7 with unified fallback)
+
+No action needed. Your existing setup continues to work unchanged.
+
+```ts
+// astro.config.mjs — unchanged
+import { defineConfig } from 'astro/config'
+import calloutPlus from 'remark-callout-plus/astro'
+
+export default defineConfig({
+  integrations: [calloutPlus()],
+})
+```
+
+#### Path B: You're on Astro 7 with the default Sätteri engine
+
+Previously, callouts would silently not render. After upgrading to v3.2.0, the same `calloutPlus()` integration auto-detects Sätteri and wires the native adapter — callouts will now render correctly with zero configuration changes.
+
+#### Path C: You want to wire the Sätteri adapter manually
+
+If you've already customized `markdown.processor` and want to wire the adapter explicitly:
+
+```ts
+import { defineConfig } from 'astro/config'
+import { satteri } from '@astrojs/markdown-satteri'
+import { calloutSatteri } from 'remark-callout-plus/satteri'
+
+export default defineConfig({
+  markdown: {
+    processor: satteri({
+      mdastPlugins: [calloutSatteri({ /* same options as the remark plugin */ })],
+    }),
+  },
+})
+```
 
 ---
 
