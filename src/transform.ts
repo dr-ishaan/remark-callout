@@ -1,4 +1,5 @@
 import type { Blockquote, Paragraph, Root } from 'mdast';
+import type { ElementContent } from 'hast';
 import type {
   CalloutNode,
   CalloutOptions,
@@ -9,6 +10,7 @@ import type {
   ResolvedConfig,
 } from './types.js';
 import { BUILT_IN_CALLOUTS } from './defaults.js';
+import { fromHtml } from 'hast-util-from-html';
 
 // ─── Callout Marker Parser ──────────────────────────────────────────────────
 
@@ -291,6 +293,11 @@ export function resolveConfig(options: CalloutOptions = {}): ResolvedConfig {
     enableFoldable,
     tag,
     allowedTypes,
+    onUnknownCallout: options.onUnknownCallout,
+    icon: options.icon,
+    title: options.title,
+    root: options.root,
+    useNativeHast: options.useNativeHast ?? false,
   };
 }
 
@@ -794,6 +801,185 @@ function groupAdjacentAccordions(tree: Root): void {
 
 // ─── MDAST Transform ────────────────────────────────────────────────────────
 
+// ─── Native HAST Transformer (v1.3.0+: no handler required) ────────────────
+
+/**
+ * Parse an SVG string into HAST ElementContent[] using hast-util-from-html.
+ * Used by the native HAST transformer to pre-parse icons so they can be
+ * stored as `hChildren` on MDAST nodes.
+ */
+function svgToHastElements(svgString: string): ElementContent[] {
+  try {
+    const hastRoot = fromHtml(svgString, { fragment: true });
+    return hastRoot.children.filter(
+      (child: { type: string }): child is ElementContent =>
+        child.type === 'element' || child.type === 'text'
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Transform a blockquote into a callout using the NATIVE HAST approach:
+ * sets `hName`/`hProperties`/`hChildren` on the blockquote and its children
+ * so `remark-rehype` transforms them natively — NO custom HAST handler needed.
+ *
+ * The blockquote is kept as a blockquote (not replaced with a custom `callout`
+ * node). Its children are restructured into:
+ *   1. A header paragraph (hName='div' or 'summary') containing icon + title
+ *   2. A body blockquote (hName='div') containing the callout body content
+ *
+ * For foldable callouts, the root uses hName='details' and the header uses
+ * hName='summary'.
+ *
+ * @since v1.3.0
+ */
+function transformBlockquoteNative(
+  blockquote: Blockquote,
+  parsed: ParsedCallout,
+  config: ResolvedConfig
+): Blockquote {
+  const typeConfig = config.types[parsed.type];
+  const calloutCtx = { type: parsed.type, title: parsed.title, foldable: parsed.foldable };
+  const icon = config.icon
+    ? config.icon(calloutCtx)
+    : typeConfig?.icon ?? STUB_DEFAULTS.icon;
+  const fallbackTitle = config.title
+    ? config.title(calloutCtx)
+    : typeConfig?.defaultTitle ?? capitalize(parsed.type);
+  const rootTag = parsed.foldable !== false
+    ? 'details'
+    : config.root
+      ? config.root(calloutCtx)
+      : config.tag;
+
+  const colorL = typeConfig?.colorL ?? STUB_DEFAULTS.colorL;
+  const colorC = typeConfig?.colorC ?? STUB_DEFAULTS.colorC;
+  const colorH = typeConfig?.colorH ?? STUB_DEFAULTS.colorH;
+
+  const isFoldable = parsed.foldable !== false;
+  const isClosed = parsed.foldable === 'closed';
+
+  // ── Extract title/body using the shared splitter ────────────────────
+  const bodyChildren = blockquote.children.slice(1);
+  const titleNodes: any[] = [];
+  const bodyInline: any[] = [];
+
+  const firstParagraph = blockquote.children[0];
+  if (firstParagraph && firstParagraph.type === 'paragraph') {
+    const split = splitTitleAndBody(firstParagraph, parsed.markerLength, parsed.title);
+    titleNodes.push(...split.titleNodes);
+    bodyInline.push(...split.bodyInline);
+  } else if (parsed.title.length > 0) {
+    titleNodes.push({ type: 'text', value: parsed.title });
+  }
+
+  if (bodyInline.length > 0) {
+    bodyChildren.unshift({ type: 'paragraph', children: bodyInline } as any);
+  }
+
+  const finalFallbackTitle = parsed.title || fallbackTitle;
+
+  // ── Build header children (icon + title) ────────────────────────────
+  const headerChildren: any[] = [];
+
+  // Icon — a paragraph with hName='span', hProperties for class, hChildren for SVG
+  if (config.showIcon !== false && icon) {
+    const svgElements = svgToHastElements(icon);
+    if (svgElements.length > 0) {
+      headerChildren.push({
+        type: 'paragraph',
+        data: {
+          hName: 'span',
+          hProperties: {
+            className: ['callout-icon'],
+            'aria-hidden': 'true',
+          },
+          hChildren: svgElements,
+        },
+        children: [],
+      });
+    }
+  }
+
+  // Title — a paragraph with hName='span', inline children for rich title
+  if (config.showTitle !== false) {
+    let titleContent: any[];
+    if (titleNodes.length > 0) {
+      titleContent = titleNodes;
+    } else {
+      titleContent = [{ type: 'text', value: finalFallbackTitle }];
+    }
+    headerChildren.push({
+      type: 'paragraph',
+      data: {
+        hName: 'span',
+        hProperties: { className: ['callout-title'] },
+      },
+      children: titleContent,
+    });
+  }
+
+  // ── Build header element (div or summary) ───────────────────────────
+  const headerProperties: any = { className: ['callout-header'] };
+  if (isFoldable) {
+    headerProperties['aria-expanded'] = isClosed ? 'false' : 'true';
+  }
+
+  const headerNode: Blockquote = {
+    type: 'blockquote',
+    data: {
+      hName: isFoldable ? 'summary' : 'div',
+      hProperties: headerProperties,
+    },
+    children: headerChildren as any,
+  };
+
+  // ── Build body element (div) ────────────────────────────────────────
+  const bodyNode: Blockquote = {
+    type: 'blockquote',
+    data: {
+      hName: 'div',
+      hProperties: { className: ['callout-body'] },
+    },
+    children: bodyChildren as any,
+  };
+
+  // ── Build root properties ───────────────────────────────────────────
+  const rootClassName = [
+    'callout',
+    `callout-${parsed.type}`,
+    ...(isFoldable ? ['callout-foldable'] : []),
+    ...(bodyChildren.length === 0 ? ['callout-empty'] : []),
+  ];
+  const rootProperties: any = {
+    className: rootClassName,
+    'data-callout': parsed.type,
+    style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
+  };
+  if (isFoldable) {
+    rootProperties['data-callout-fold'] = isClosed ? 'closed' : 'open';
+  }
+  if (parsed.id) {
+    rootProperties.id = parsed.id;
+  }
+  // For foldable open, set the `open` attribute
+  if (isFoldable && !isClosed) {
+    rootProperties.open = true;
+  }
+
+  // ── Return the restructured blockquote ──────────────────────────────
+  return {
+    type: 'blockquote',
+    data: {
+      hName: rootTag,
+      hProperties: rootProperties,
+    },
+    children: [headerNode, bodyNode],
+  } as Blockquote;
+}
+
 /**
  * Transform a blockquote into a callout node.
  *
@@ -815,8 +1001,27 @@ export function transformBlockquote(
     return transformLiterary(blockquote, parsed, variant);
   }
 
+  // v1.3.0: Native HAST mode for standard callouts (no handler required).
+  // Literary types and structured-data types still use the handler path.
+  if (config.useNativeHast && parsed.type !== 'bio' && parsed.type !== 'event') {
+    return transformBlockquoteNative(blockquote, parsed, config) as any;
+  }
+
   const typeConfig = config.types[parsed.type];
-  const icon = typeConfig?.icon ?? STUB_DEFAULTS.icon;
+  // v1.3.0: callback-based config takes precedence over static maps.
+  const calloutCtx = { type: parsed.type, title: parsed.title, foldable: parsed.foldable };
+  const icon = config.icon
+    ? config.icon(calloutCtx)
+    : typeConfig?.icon ?? STUB_DEFAULTS.icon;
+  const fallbackTitle = config.title
+    ? config.title(calloutCtx)
+    : typeConfig?.defaultTitle ?? capitalize(parsed.type);
+  // v1.3.0: callback-based root tag (foldable always uses <details>)
+  const rootTag = parsed.foldable !== false
+    ? 'details'
+    : config.root
+      ? config.root(calloutCtx)
+      : config.tag;
 
   // Build oklch color CSS variables as inline data for the handler
   const colorL = typeConfig?.colorL ?? STUB_DEFAULTS.colorL;
@@ -860,19 +1065,21 @@ export function transformBlockquote(
 
   // Determine the plain-text fallback title (used when titleNodes is empty
   // OR when showTitle renders the text fallback).
-  const fallbackTitle = parsed.title || typeConfig?.defaultTitle || capitalize(parsed.type);
+  // v1.3.0: uses callback-based `fallbackTitle` (resolved above) which
+  // respects the `title` callback > static `titles` map > built-in default.
+  const finalFallbackTitle = parsed.title || fallbackTitle;
 
   const node: CalloutNode = {
     type: 'callout',
     data: {
       calloutType: parsed.type,
-      calloutTitle: fallbackTitle,
+      calloutTitle: finalFallbackTitle,
       calloutTitleNodes: titleNodes.length > 0 ? titleNodes : undefined,
       calloutIcon: icon,
       foldable: parsed.foldable,
       showTitle: config.showTitle,
       showIcon: config.showIcon,
-      hName: parsed.foldable !== false ? 'details' : config.tag,
+      hName: rootTag,
       hProperties: {
         style: `--callout-l: ${colorL}; --callout-c: ${colorC}; --callout-h: ${colorH};`,
       },
@@ -963,6 +1170,27 @@ export function remarkCalloutTransformer(
           // If the type is not in the whitelist and not literary, fall through
           // to a plain blockquote (don't transform).
           if (allowedTypes && !allowedTypes.has(parsed.type) && !LITERARY_TYPES.has(parsed.type)) {
+            // v1.3.0: if onUnknownCallout is set, give the consumer a chance
+            // to remap the unknown type or explicitly drop it.
+            if (config.onUnknownCallout) {
+              const remapped = config.onUnknownCallout({
+                type: parsed.type,
+                title: parsed.title || undefined,
+                foldable: parsed.foldable,
+                id: parsed.id,
+              });
+              if (remapped) {
+                // Consumer remapped — use the new type's config
+                parsed.type = remapped.type.toLowerCase();
+                if (remapped.title !== undefined) parsed.title = remapped.title;
+                parsed.foldable = remapped.foldable;
+                parsed.id = remapped.id;
+                const calloutNode = transformBlockquote(node as Blockquote, parsed, config);
+                children[i] = calloutNode;
+                continue;
+              }
+              // Consumer returned undefined → fall through to plain blockquote
+            }
             // Dev-mode warning for types that ARE known but not whitelisted:
             // skip the warning (the user explicitly chose to exclude them).
             // Warn only for truly unknown types (not in config.types at all).
@@ -974,6 +1202,27 @@ export function remarkCalloutTransformer(
 
           // Warn for unknown types even when no whitelist is set (dev mode only).
           if (!allowedTypes && !config.types[parsed.type] && !LITERARY_TYPES.has(parsed.type)) {
+            // v1.3.0: if onUnknownCallout is set, give the consumer a chance
+            // to remap or drop the unknown type.
+            if (config.onUnknownCallout) {
+              const remapped = config.onUnknownCallout({
+                type: parsed.type,
+                title: parsed.title || undefined,
+                foldable: parsed.foldable,
+                id: parsed.id,
+              });
+              if (remapped) {
+                parsed.type = remapped.type.toLowerCase();
+                if (remapped.title !== undefined) parsed.title = remapped.title;
+                parsed.foldable = remapped.foldable;
+                parsed.id = remapped.id;
+                const calloutNode = transformBlockquote(node as Blockquote, parsed, config);
+                children[i] = calloutNode;
+                continue;
+              }
+              // Consumer returned undefined → fall through to plain blockquote
+              continue;
+            }
             warnUnknownType(parsed.type, /* willRender */ true);
             // Still render as a callout (backward compat) — just warn.
           }

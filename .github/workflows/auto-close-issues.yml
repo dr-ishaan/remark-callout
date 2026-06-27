@@ -1,0 +1,86 @@
+name: Auto-close issues on merge
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  close-issues:
+    runs-on: ubuntu-latest
+    # Only run when the PR was merged (not just closed without merging)
+    if: github.event.pull_request.merged == true
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Close linked issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const prBody = pr.body || '';
+            const prTitle = pr.title || '';
+
+            // Find issue references in the PR body and title.
+            // Matches: "fixes #123", "closes #456", "resolves #789",
+            // "fix #123", "close #456", "resolve #789" (case-insensitive).
+            const issuePattern = /(?:fix|closes?|resolves?)\s+#(\d+)/gi;
+            const matches = [];
+
+            // Search PR title first
+            let titleMatch;
+            const titleRe = new RegExp(issuePattern.source, 'gi');
+            while ((titleMatch = titleRe.exec(prTitle)) !== null) {
+              matches.push(parseInt(titleMatch[1]));
+            }
+
+            // Search PR body
+            let bodyMatch;
+            const bodyRe = new RegExp(issuePattern.source, 'gi');
+            while ((bodyMatch = bodyRe.exec(prBody)) !== null) {
+              matches.push(parseInt(bodyMatch[1]));
+            }
+
+            // Also check for bare "#123" references in the body that might
+            // indicate a fix (but only if "fix"/"close"/"resolve" is nearby)
+            const nearbyPattern = /(?:fix|closes?|resolves?)[\s\S]{0,50}?#(\d+)/gi;
+            let nearbyMatch;
+            while ((nearbyMatch = nearbyPattern.exec(prBody)) !== null) {
+              const num = parseInt(nearbyMatch[1]);
+              if (!matches.includes(num)) {
+                matches.push(num);
+              }
+            }
+
+            if (matches.length === 0) {
+              console.log('No issue references found in PR title or body.');
+              return;
+            }
+
+            console.log(`Found issue references: ${matches.join(', ')}`);
+
+            for (const issueNum of matches) {
+              try {
+                // Add a comment linking the PR
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNum,
+                  body: `Closed by PR #${pr.number}: ${pr.title}\n\n${pr.html_url}`,
+                });
+
+                // Close the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNum,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+
+                console.log(`  ✅ Closed issue #${issueNum}`);
+              } catch (error) {
+                console.log(`  ⚠️  Could not close issue #${issueNum}: ${error.message}`);
+              }
+            }

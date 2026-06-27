@@ -90,6 +90,95 @@ export interface CalloutOptions {
    * @default undefined (all types allowed)
    */
   types?: string[];
+
+  /**
+   * Callback invoked when an unknown callout type is encountered (not in
+   * `types` config and not a literary/accordion type).
+   *
+   * - If the function returns a `Callout` object, the callout is rendered
+   *   using the returned type's config (allowing runtime type remapping).
+   * - If the function returns `undefined`, the callout falls through to a
+   *   plain blockquote (no callout rendering).
+   * - If unset, the default behavior is used: unknown types render as
+   *   callouts with default styling (note colors/icon) and a dev-mode
+   *   warning is logged.
+   *
+   * @example
+   * // Remap unknown types to 'note', or drop them
+   * remarkCallout({
+   *   onUnknownCallout: (callout) => {
+   *     if (callout.type === 'experimental') return { ...callout, type: 'note' };
+   *     return undefined; // fall back to plain blockquote
+   *   },
+   * })
+   *
+   * @since v1.3.0
+   */
+  onUnknownCallout?: (callout: { type: string; title?: string; foldable: Foldable; id?: string }) =>
+    { type: string; title?: string; foldable: Foldable; id?: string } | undefined;
+
+  /**
+   * Callback to dynamically resolve the icon for a callout type.
+   * Takes precedence over the static `icons` map and built-in defaults.
+   *
+   * @example
+   * remarkCallout({
+   *   icon: (callout) => callout.type === 'warning' ? '<svg>...</svg>' : '<svg>...</svg>',
+   * })
+   *
+   * @since v1.3.0
+   */
+  icon?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
+
+  /**
+   * Callback to dynamically resolve the default title for a callout type.
+   * Takes precedence over the static `titles` map and built-in defaults.
+   *
+   * @example
+   * remarkCallout({
+   *   title: (callout) => callout.type.toUpperCase(),
+   * })
+   *
+   * @since v1.3.0
+   */
+  title?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
+
+  /**
+   * Callback to dynamically resolve the root element tag name for a
+   * callout. Takes precedence over the static `tag` option.
+   *
+   * Note: foldable callouts always use `<details>` regardless of this
+   * callback (native HTML open/close behavior requires it).
+   *
+   * @example
+   * remarkCallout({
+   *   root: (callout) => callout.type === 'note' ? 'aside' : 'div',
+   * })
+   *
+   * @since v1.3.0
+   */
+  root?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
+
+  /**
+   * When `true`, the plugin sets `hName`/`hProperties`/`hChildren` data on
+   * MDAST nodes instead of creating a custom `callout` node type. This
+   * eliminates the need to wire `calloutToHast` into `remark-rehype` —
+   * consumers can use `.use(remarkRehype)` with default config.
+   *
+   * **Current limitation:** Only standard callouts (note/warning/tip/etc.)
+   * and foldable callouts support native HAST mode. Literary types
+   * (epigraph/pullquote/aside/sidebar), structured-data types (bio/event),
+   * and accordions still use the custom `callout` node type and require
+   * the `calloutToHast` handler.
+   *
+   * When `false` (default), all callout types create custom `callout` MDAST
+   * nodes and require `{ handlers: { callout: calloutToHast } }` in
+   * `remark-rehype`.
+   *
+   * @default false
+   * @since v1.3.0
+   */
+  useNativeHast?: boolean;
 }
 
 /**
@@ -108,6 +197,17 @@ export interface ResolvedConfig {
    * are always allowed regardless of this setting.
    */
   allowedTypes: Set<string> | null;
+  /** Callback for unknown callout types (v1.3.0+) */
+  onUnknownCallout?: (callout: { type: string; title?: string; foldable: Foldable; id?: string }) =>
+    { type: string; title?: string; foldable: Foldable; id?: string } | undefined;
+  /** Callback to dynamically resolve icon (v1.3.0+) */
+  icon?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
+  /** Callback to dynamically resolve title (v1.3.0+) */
+  title?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
+  /** Callback to dynamically resolve root tag (v1.3.0+) */
+  root?: (callout: { type: string; title?: string; foldable: Foldable }) => string;
+  /** Use native HAST (hName/hProperties) instead of custom callout node (v1.3.0+) */
+  useNativeHast: boolean;
 }
 
 /**

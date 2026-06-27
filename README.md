@@ -36,6 +36,32 @@ npm install remark-callout-plus
 
 ### Standard setup (any unified pipeline)
 
+**v1.3.0+ — Native HAST mode (no handler required):**
+
+```ts
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+import remarkCallout from 'remark-callout-plus'
+import remarkRehype from 'remark-rehype'
+import rehypeStringify from 'rehype-stringify'
+
+// Import the default stylesheet
+import 'remark-callout-plus/styles/callout.css'
+
+const result = unified()
+  .use(remarkParse)
+  .use(remarkCallout, { useNativeHast: true })  // ← no handler needed!
+  .use(remarkRehype)                             // ← standard config
+  .use(rehypeStringify)
+  .processSync('> [!NOTE]\n> Hello world')
+
+console.log(String(result))
+```
+
+> **Note:** `useNativeHast: true` currently supports standard callouts (note/warning/tip/etc.) and foldable callouts. Literary types (epigraph/pullquote/aside/sidebar), structured-data types (bio/event), and accordions still require the handler (see below).
+
+**Handler-based setup (all callout types, v1.0.0+):**
+
 ```ts
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -56,7 +82,7 @@ const result = unified()
 console.log(String(result))
 ```
 
-> **Important:** You MUST pass `{ handlers: { callout: calloutToHast } }` to `remark-rehype`. Without it, callouts render as empty `<div>`s.
+> **Important:** When NOT using `useNativeHast: true`, you MUST pass `{ handlers: { callout: calloutToHast } }` to `remark-rehype`. Without it, callouts render as empty `<div>`s.
 
 ### Astro setup (one line)
 
@@ -282,6 +308,29 @@ remarkCallout({
   // Whitelist — only these types render as callouts
   // Literary types and accordions always render regardless
   types: ['note', 'warning', 'tip'],  // default: undefined (all allowed)
+
+  // ── v1.3.0+ new options ──────────────────────────────────────────
+
+  // Native HAST mode — no calloutToHast handler required.
+  // Currently supports standard + foldable callouts.
+  // Literary/structured-data/accordion still need the handler.
+  useNativeHast: false,       // default (true planned for v2.0)
+
+  // Intercept unknown callout types (instead of console.warn).
+  // Return a {type, ...} to remap, or undefined to drop to blockquote.
+  onUnknownCallout: (callout) => {
+    if (callout.type === 'experimental') return { ...callout, type: 'note' };
+    return undefined; // fall back to plain blockquote
+  },
+
+  // Dynamic icon resolution (takes precedence over `icons` map)
+  icon: (callout) => callout.type === 'warning' ? '<svg>...</svg>' : '<svg>...</svg>',
+
+  // Dynamic title resolution (takes precedence over `titles` map)
+  title: (callout) => callout.type.toUpperCase(),
+
+  // Dynamic root tag (takes precedence over `tag`; foldable always uses <details>)
+  root: (callout) => callout.type === 'note' ? 'aside' : 'div',
 })
 ```
 
