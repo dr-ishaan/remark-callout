@@ -409,6 +409,105 @@ function renderAccordionIcon(icon: string): ElementContent[] {
   return [{ type: 'text', value: icon } as HastText];
 }
 
+// ─── Em-Dash Attribution Helper (shared by renderLiterary + renderAside) ───
+
+/**
+ * Scan the last paragraph of a literary callout's body for an em-dash
+ * attribution line (a line starting with `—`, `–`, or `--`) and strip it
+ * from the body.
+ *
+ * Returns the attribution text (if found) and the modified body MDAST
+ * (with the em-dash line removed). The caller decides whether to USE the
+ * attribution text as the figcaption (only when no title was given on the
+ * marker line — title takes priority).
+ *
+ * **Why this helper exists:** The original detection only checked
+ * `firstChild.type === 'text'`. But when the quote body starts with inline
+ * markdown (`*italics*`, `**bold**`, `` `code` ``, `[link]`), remark-parse
+ * produces a paragraph whose first child is `em`/`strong`/`code`/`link`,
+ * not `text`. The em-dash line then lives in a LATER text child
+ * (e.g. `[<em>"Quote"</em>, <text>"\n— Author">]`), and the old detection
+ * skipped it entirely — gluing the em-dash into the quote body.
+ *
+ * This helper iterates ALL children of the last paragraph in reverse,
+ * finds the last text node, and checks if its final line is an em-dash
+ * attribution. This handles all cases:
+ *   - Plain quote: `[<text>"Quote\n— Author">]` → first child is text, found
+ *   - Italic quote: `[<em>"Quote"</em>, <text>"\n— Author">]` → second child is text, found
+ *   - Multi-paragraph: last paragraph checked, earlier paragraphs untouched
+ */
+function extractEmDashAttribution(
+  bodyMdast: any[]
+): { attribution: string | undefined; bodyMdast: any[] } {
+  if (bodyMdast.length === 0) {
+    return { attribution: undefined, bodyMdast };
+  }
+
+  const last = bodyMdast[bodyMdast.length - 1];
+  if (!last || last.type !== 'paragraph') {
+    return { attribution: undefined, bodyMdast };
+  }
+
+  const lastPara = last as { type: 'paragraph'; children: any[] };
+  const children = lastPara.children;
+
+  // Iterate children in REVERSE to find the last text node that contains
+  // an em-dash line. This handles the case where the quote starts with
+  // inline markdown (em/strong/code/link) and the em-dash text is in a
+  // later sibling text node.
+  for (let childIdx = children.length - 1; childIdx >= 0; childIdx--) {
+    const child = children[childIdx];
+    if (!child || child.type !== 'text') continue;
+
+    const text = child.value.replace(/\r\n/g, '\n');
+    const lines = text.split('\n');
+
+    // Scan lines in reverse for an em-dash attribution line
+    let attrLineIdx = -1;
+    let attrText = '';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const m = lines[i].match(/^\s*(?:--|—|–)\s*(.+)/);
+      if (m) {
+        attrLineIdx = i;
+        attrText = m[1].trim();
+        break;
+      }
+    }
+
+    if (attrLineIdx < 0) continue; // no em-dash in this text node, try earlier children
+
+    // Found the em-dash line. Strip it from this text node.
+    const beforeEmDash = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
+    let newBodyMdast = [...bodyMdast];
+
+    if (beforeEmDash.length > 0) {
+      // Keep the text node but with the em-dash line stripped.
+      // Also strip trailing whitespace-only text nodes after this point
+      // (they were just separators before the em-dash line).
+      const newChildren = children.slice(0, childIdx);
+      newChildren.push({ ...child, value: beforeEmDash });
+      // Drop any trailing children after the modified text node (they
+      // were part of the em-dash attribution line or whitespace).
+      const newPara = { ...lastPara, children: newChildren };
+      newBodyMdast[newBodyMdast.length - 1] = newPara;
+    } else {
+      // The text node was ONLY the em-dash line — remove it entirely.
+      const newChildren = children.slice(0, childIdx);
+      if (newChildren.length > 0) {
+        const newPara = { ...lastPara, children: newChildren };
+        newBodyMdast[newBodyMdast.length - 1] = newPara;
+      } else {
+        // The paragraph had only the em-dash line — remove the whole paragraph
+        newBodyMdast = newBodyMdast.slice(0, -1);
+      }
+    }
+
+    return { attribution: attrText, bodyMdast: newBodyMdast };
+  }
+
+  return { attribution: undefined, bodyMdast };
+}
+
 // ─── Literary Renderer (Epigraph + Pullquote) ─────────────────────────────
 
 /**
@@ -450,52 +549,21 @@ function renderLiterary(
   let bodyMdast = node.children ? [...node.children] : [];
 
   // ── Em-dash attribution detection ──────────────────────────────────
-  // Always scan the last paragraph for an em-dash attribution line and
-  // STRIP it from the body (so it doesn't appear in the quote). The em-dash
-  // text is used as the figcaption ONLY when no explicit title attribution
-  // was given on the marker line. When a title IS present, the title wins
-  // as the attribution and the em-dash line is simply removed from the body.
+  // Always scan for an em-dash attribution line and STRIP it from the body
+  // (so it doesn't appear in the quote). The em-dash text is used as the
+  // figcaption ONLY when no explicit title attribution was given on the
+  // marker line. When a title IS present, the title wins as the attribution
+  // and the em-dash line is simply removed from the body.
   //
-  // This fixes the bug where `> [!EPIGRAPH] Title\n> Quote\n> — Author`
-  // glued the em-dash line into the quote body AND duplicated the
-  // attribution (once in the quote, once in the figcaption from the title).
-  if (bodyMdast.length > 0) {
-    const last = bodyMdast[bodyMdast.length - 1];
-    if (last && (last as any).type === 'paragraph') {
-      const lastPara = last as { type: 'paragraph'; children: any[] };
-      const firstChild = lastPara.children[0];
-      if (firstChild && firstChild.type === 'text') {
-        const text = firstChild.value.replace(/\r\n/g, '\n');
-        const lines = text.split('\n');
-
-        let attrLineIdx = -1;
-        let attrText = '';
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const m = lines[i].match(/^\s*(?:--|—|–)\s*(.+)/);
-          if (m) {
-            attrLineIdx = i;
-            attrText = m[1].trim();
-            break;
-          }
-        }
-
-        if (attrLineIdx >= 0) {
-          // Strip the em-dash line from the body (always — whether or not
-          // we use it as the attribution).
-          const bodyText = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
-          if (bodyText.length > 0) {
-            lastPara.children[0] = { ...firstChild, value: bodyText };
-          } else {
-            bodyMdast = bodyMdast.slice(0, -1);
-          }
-
-          // Only use the em-dash text as the attribution when no title
-          // attribution was given on the marker line. Title takes priority.
-          if (!attributionText && !attributionNodes) {
-            attributionText = attrText;
-          }
-        }
-      }
+  // Uses the shared `extractEmDashAttribution` helper which scans ALL
+  // children of the last paragraph (not just the first text child) — this
+  // handles quotes that start with inline markdown (*italics*, **bold**,
+  // `code`, [link]) where the em-dash text lives in a later sibling text node.
+  {
+    const result = extractEmDashAttribution(bodyMdast);
+    bodyMdast = result.bodyMdast;
+    if (result.attribution && !attributionText && !attributionNodes) {
+      attributionText = result.attribution;
     }
   }
 
@@ -588,42 +656,16 @@ function renderAside(
 
   let bodyMdast = node.children ? [...node.children] : [];
 
-  // Attribution detection (same as renderLiterary).
+  // Attribution detection (uses the shared `extractEmDashAttribution` helper).
   // Note: em-dash attribution is independent of the heading — a callout can
   // have BOTH a heading (from the marker line) AND an em-dash attribution
-  // (from the last body line).
+  // (from the last body line). The helper scans ALL children of the last
+  // paragraph, so it handles bodies that start with inline markdown.
   let attribution: string | undefined;
-  if (bodyMdast.length > 0) {
-    const last = bodyMdast[bodyMdast.length - 1];
-    if (last && (last as any).type === 'paragraph') {
-      const lastPara = last as { type: 'paragraph'; children: any[] };
-      const firstChild = lastPara.children[0];
-      if (firstChild && firstChild.type === 'text') {
-        const text = firstChild.value.replace(/\r\n/g, '\n');
-        const lines = text.split('\n');
-
-        let attrLineIdx = -1;
-        let attrText = '';
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const m = lines[i].match(/^\s*(?:--|—|–)\s*(.+)/);
-          if (m) {
-            attrLineIdx = i;
-            attrText = m[1].trim();
-            break;
-          }
-        }
-
-        if (attrLineIdx >= 0) {
-          attribution = attrText;
-          const bodyText = lines.slice(0, attrLineIdx).join('\n').replace(/\s+$/, '');
-          if (bodyText.length > 0) {
-            lastPara.children[0] = { ...firstChild, value: bodyText };
-          } else {
-            bodyMdast = bodyMdast.slice(0, -1);
-          }
-        }
-      }
-    }
+  {
+    const result = extractEmDashAttribution(bodyMdast);
+    bodyMdast = result.bodyMdast;
+    attribution = result.attribution;
   }
 
   const bodyNode = { ...node, children: bodyMdast };
