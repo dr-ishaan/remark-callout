@@ -201,11 +201,24 @@
 }
 
 /* ─── Dark Mode ────────────────────────────────────────────────────────── */
+/* v3.1: Global chroma dampening for dark mode.
+   Highly saturated colors vibrate against dark backgrounds. We reduce
+   chroma by ~20% and boost lightness slightly to maintain perceptual
+   brightness without the eye strain. Individual callouts can still
+   override --callout-l/c/h if needed. */
 
 @media (prefers-color-scheme: dark) {
   :root {
     --callout-bg-alpha: 0.1;
     --callout-icon-alpha: 0.9;
+  }
+
+  .callout {
+    /* Chroma damping: reduce saturation ~20%, boost lightness +0.1
+       using calc() on the inline custom properties. This is applied
+       AFTER the inline style sets --callout-l/c/h, so it overrides. */
+    --callout-c: calc(var(--callout-c, 0.18) * 0.8);
+    --callout-l: calc(var(--callout-l, 0.55) + 0.1);
   }
 
   .callout-body blockquote {

@@ -25,9 +25,11 @@ import type { CalloutTypeConfig } from './types.js';
 
 // ─── SVG Icon Templates ─────────────────────────────────────────────────────
 // Each is a complete <svg> string with stroke="currentColor" and fill="none".
-
+// v3.1: stroke-width reduced from 2.5 → 2.0 for better legibility at 16×16.
+// (2.5 on a 24×24 grid renders as ~1.66px at 16×16, which is muddy; 2.0
+// renders as ~1.33px, crisp on both retina and non-retina displays.)
 const svg = (paths: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
 const ICONS = {
   // ── Core icons (types 1–28) ───────────────────────────────────────────
@@ -1033,6 +1035,41 @@ const ICONS = {
   workflowPlay: svg(
     '<rect width="8" height="8" x="3" y="3" rx="2"/><rect width="8" height="8" x="13" y="13" rx="2"/><path d="M11 7h2a2 2 0 0 1 2 2v2"/><polygon points="6 17 8 18.5 6 20 6 17"/>'
   ),
+
+  // ── v3.1 icon refinements (squint-test fixes + deduplication) ────────
+  // These icons replace complex/path-heavy variants that failed the 16×16
+  // "squint test" — at 16×16 with stroke-width 2.0, anything with more
+  // than 3-4 intersecting paths renders as an unrecognizable blob.
+
+  /** vennDiagram — compromise (two overlapping circles, perfectly legible) */
+  vennDiagram: svg(
+    '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/>'
+  ),
+
+  /** scatterAxes — outlier (axes + 4 dots with r=1.5, won't blob) */
+  scatterAxes: svg(
+    '<line x1="4" y1="20" x2="20" y2="20"/><line x1="4" y1="20" x2="4" y2="4"/><circle cx="8" cy="16" r="1.5"/><circle cx="12" cy="14" r="1.5"/><circle cx="16" cy="15" r="1.5"/><circle cx="18" cy="6" r="1.5"/>'
+  ),
+
+  /** sproutSimple — incubator (minimalist stem + 2 leaves, clean at 16×16) */
+  sproutSimple: svg(
+    '<path d="M12 22V12"/><path d="M12 12c0-4 4-6 8-6 0 4-4 6-8 6z"/><path d="M12 12c0-4-4-6-8-6 0 4 4 6 8 6z"/>'
+  ),
+
+  /** bookMarked — references (book with bookmark ribbon, dedup from bibliography) */
+  bookMarked: svg(
+    '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><polyline points="10 2 10 8 13 6 16 8 16 2"/>'
+  ),
+
+  /** linkIcon — related (chain link, represents connections not reading) */
+  linkIcon: svg(
+    '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
+  ),
+
+  /** quoteBubble — citation (message bubble, dedup from bibliography) */
+  quoteBubble: svg(
+    '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>'
+  ),
 } as const;
 
 // ─── Color Families (oklch L C H) ───────────────────────────────────────────
@@ -1438,7 +1475,7 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
   },
   qa: {
     defaultTitle: 'QA',
-    icon: ICONS.bugCheck,
+    icon: ICONS.clipboardCheck,  // v3.1: cleaner silhouette than bug+check
     ...COLORS.green,
   },
   'test-spec': {
@@ -1491,17 +1528,17 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
   },
   related: {
     defaultTitle: 'Related',
-    icon: ICONS.bookOpen,
+    icon: ICONS.linkIcon,  // v3.1: chain link (connections, not reading)
     ...COLORS.purple,
   },
   references: {
     defaultTitle: 'References',
-    icon: ICONS.bookOpen,
+    icon: ICONS.bookMarked,  // v3.1: book with bookmark (dedup from bibliography)
     ...COLORS.purple,
   },
   citation: {
     defaultTitle: 'Citation',
-    icon: ICONS.bookOpen,
+    icon: ICONS.quoteBubble,  // v3.1: message bubble (dedup from bibliography)
     ...COLORS.purple,
   },
 
@@ -1567,7 +1604,7 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
   },
   incubator: {
     defaultTitle: 'Incubator',
-    icon: ICONS.sprout,
+    icon: ICONS.sproutSimple,  // v3.1: minimalist sprout (squint-test fix)
     ...COLORS.purple,
   },
   'ai-model': {
@@ -1742,7 +1779,7 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
   },
   outlier: {
     defaultTitle: 'Outlier',
-    icon: ICONS.scatter,
+    icon: ICONS.scatterAxes,  // v3.1: axes + small dots (won't blob at 16×16)
     ...COLORS.amber,
   },
   anomaly: {
@@ -1821,7 +1858,7 @@ export const BUILT_IN_CALLOUTS: Record<string, CalloutTypeConfig> = {
   },
   compromise: {
     defaultTitle: 'Compromise',
-    icon: ICONS.handshake,
+    icon: ICONS.vennDiagram,  // v3.1: two overlapping circles (squint-test fix)
     ...COLORS.orange,
   },
   rationale: {
